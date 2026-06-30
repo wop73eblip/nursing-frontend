@@ -231,9 +231,19 @@ export default function AdminPage() {
   const [editForm, setEditForm] = useState<Partial<User & { new_password: string; showEditPwd?: boolean }>>({});
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
   const [clearLogsConfirm, setClearLogsConfirm] = useState<{hours:number; label:string} | null>(null);
-  const [dragFrom, setDragFrom] = useState<number | null>(null);
-  const [dragOver, setDragOver] = useState<number | null>(null);
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // iOS 風格拖曳（帳號管理）
+  type DragState = { fromIdx: number; overIdx: number; offsetY: number; startY: number; curY: number; itemH: number };
+  const userDragRef = useRef<DragState | null>(null);
+  const [userDragOver, setUserDragOver] = useState<number | null>(null);
+  const [userDragging, setUserDragging] = useState<number | null>(null);
+  const userItemRefs = useRef<(HTMLDivElement | null)[]>([]);
+  // iOS 風格拖曳（班別設定）
+  type ShiftDragState = { type: "work"|"off"; fromIdx: number; overIdx: number; startY: number; curY: number; itemH: number };
+  const shiftDragRef = useRef<ShiftDragState | null>(null);
+  const [shiftDragOver, setShiftDragOver] = useState<{ type:"work"|"off"; idx:number } | null>(null);
+  const [shiftDragging, setShiftDragging] = useState<{ type:"work"|"off"; idx:number } | null>(null);
+  const shiftWorkRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const shiftOffRefs  = useRef<(HTMLDivElement | null)[]>([]);
 
   // 週期設定
   const [cycle, setCycle] = useState({
@@ -742,20 +752,126 @@ export default function AdminPage() {
     } catch {}
   }
 
-  function dropUser(toIdx: number) {
-    if (dragFrom === null || dragFrom === toIdx) {
-      setDragFrom(null); setDragOver(null); return;
-    }
-    // 以 visibleUsers 的索引操作，再合併回完整 users
+  function dropUser(fromIdx: number, toIdx: number) {
+    if (fromIdx === toIdx) return;
     const visible = isSuperAdmin ? [...users] : users.filter(u => u.role !== "superadmin");
     const hidden  = isSuperAdmin ? [] : users.filter(u => u.role === "superadmin");
-    const [moved] = visible.splice(dragFrom, 1);
+    const [moved] = visible.splice(fromIdx, 1);
     visible.splice(toIdx, 0, moved);
     const merged = [...hidden, ...visible];
     setUsers(merged);
-    setDragFrom(null);
-    setDragOver(null);
     saveSortOrder(merged);
+  }
+
+  // 帳號管理 iOS 觸控拖曳
+  function handleUserDragHandleTouchStart(e: React.TouchEvent, idx: number) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const el = userItemRefs.current[idx];
+    const itemH = el?.getBoundingClientRect().height ?? 60;
+    userDragRef.current = { fromIdx: idx, overIdx: idx, offsetY: 0, startY: touch.clientY, curY: touch.clientY, itemH };
+    setUserDragging(idx);
+    setUserDragOver(idx);
+    if (navigator.vibrate) navigator.vibrate(40);
+
+    function onMove(ev: TouchEvent) {
+      ev.preventDefault();
+      const t = ev.touches[0];
+      if (!userDragRef.current) return;
+      userDragRef.current.curY = t.clientY;
+      const dy = t.clientY - userDragRef.current.startY;
+      const newOver = Math.max(0, Math.min(
+        (isSuperAdmin ? users.length : users.filter(u => u.role !== "superadmin").length) - 1,
+        userDragRef.current.fromIdx + Math.round(dy / userDragRef.current.itemH)
+      ));
+      if (newOver !== userDragRef.current.overIdx) {
+        userDragRef.current.overIdx = newOver;
+        setUserDragOver(newOver);
+      }
+      // 即時更新拖曳元素位置
+      const handle = userItemRefs.current[idx];
+      if (handle) handle.style.transform = `translateY(${dy}px) scale(1.02)`;
+    }
+
+    function onEnd() {
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+      document.removeEventListener("touchcancel", onEnd);
+      const dr = userDragRef.current;
+      if (dr) {
+        const handle = userItemRefs.current[idx];
+        if (handle) { handle.style.transform = ""; handle.style.transition = ""; }
+        dropUser(dr.fromIdx, dr.overIdx);
+      }
+      userDragRef.current = null;
+      setUserDragging(null);
+      setUserDragOver(null);
+    }
+
+    const el2 = userItemRefs.current[idx];
+    if (el2) { el2.style.transition = "box-shadow 0.15s ease"; }
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onEnd);
+    document.addEventListener("touchcancel", onEnd);
+  }
+
+  // 班別設定 iOS 觸控拖曳
+  function handleShiftDragHandleTouchStart(e: React.TouchEvent, type: "work"|"off", idx: number) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const refs = type === "work" ? shiftWorkRefs : shiftOffRefs;
+    const el = refs.current[idx];
+    const itemH = el?.getBoundingClientRect().height ?? 56;
+    shiftDragRef.current = { type, fromIdx: idx, overIdx: idx, startY: touch.clientY, curY: touch.clientY, itemH };
+    setShiftDragging({ type, idx });
+    setShiftDragOver({ type, idx });
+    if (navigator.vibrate) navigator.vibrate(40);
+
+    function onMove(ev: TouchEvent) {
+      ev.preventDefault();
+      const t = ev.touches[0];
+      if (!shiftDragRef.current) return;
+      shiftDragRef.current.curY = t.clientY;
+      const dy = t.clientY - shiftDragRef.current.startY;
+      const list = type === "work" ? editWorkShifts : editOffShifts;
+      const newOver = Math.max(0, Math.min(list.length - 1,
+        shiftDragRef.current.fromIdx + Math.round(dy / shiftDragRef.current.itemH)
+      ));
+      if (newOver !== shiftDragRef.current.overIdx) {
+        shiftDragRef.current.overIdx = newOver;
+        setShiftDragOver({ type, idx: newOver });
+      }
+      const elDrag = refs.current[idx];
+      if (elDrag) elDrag.style.transform = `translateY(${dy}px) scale(1.02)`;
+    }
+
+    function onEnd() {
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+      document.removeEventListener("touchcancel", onEnd);
+      const dr = shiftDragRef.current;
+      if (dr && dr.fromIdx !== dr.overIdx) {
+        const elDrag = refs.current[idx];
+        if (elDrag) { elDrag.style.transform = ""; }
+        const setter = type === "work" ? setEditWorkShifts : setEditOffShifts;
+        setter(prev => {
+          const arr = [...prev];
+          const [moved] = arr.splice(dr.fromIdx, 1);
+          arr.splice(dr.overIdx, 0, moved);
+          return arr;
+        });
+      } else {
+        const elDrag = refs.current[idx];
+        if (elDrag) elDrag.style.transform = "";
+      }
+      shiftDragRef.current = null;
+      setShiftDragging(null);
+      setShiftDragOver(null);
+    }
+
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onEnd);
+    document.addEventListener("touchcancel", onEnd);
   }
 
   // 行內快速修改單一欄位
@@ -1004,14 +1120,11 @@ export default function AdminPage() {
         .ap-tabs {
           position: sticky; top: 52px; z-index: 100;
           background: #fff; border-bottom: 1px solid #e5e7eb;
-          display: flex; overflow-x: auto; gap: 0;
+          display: flex; flex-wrap: wrap; gap: 0;
           box-shadow: 0 1px 3px rgba(0,0,0,.06);
-          -webkit-overflow-scrolling: touch;
-          scrollbar-width: none;
         }
-        .ap-tabs::-webkit-scrollbar { display: none; }
         .ap-tab {
-          padding: 14px 18px; border: none; background: transparent; cursor: pointer;
+          padding: 12px 16px; border: none; background: transparent; cursor: pointer;
           font-family: inherit; font-size: 13px; font-weight: 500; white-space: nowrap;
           border-bottom: 2px solid transparent; color: #6b7280;
           transition: color .15s, border-color .15s;
@@ -1111,6 +1224,31 @@ export default function AdminPage() {
 
         /* 班別設定編輯列 */
         .shift-edit-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid #f3f4f6; }
+
+        /* iOS 風格拖曳把手 */
+        .drag-handle {
+          color: #d1d5db; font-size: 17px; line-height: 1;
+          cursor: grab; flex-shrink: 0;
+          padding: 6px 4px;
+          user-select: none; -webkit-user-select: none;
+          -webkit-touch-callout: none; touch-action: none;
+        }
+        .drag-handle:active { cursor: grabbing; color: #9ca3af; }
+
+        /* 拖曳中的項目 */
+        .drag-item {
+          transition: transform 0.15s ease, box-shadow 0.15s ease;
+          position: relative; z-index: 1;
+        }
+        .drag-item.is-dragging {
+          transform: scale(1.02);
+          box-shadow: 0 8px 24px rgba(0,0,0,.15);
+          z-index: 10; background: #fff !important;
+          border-radius: 10px;
+        }
+        .drag-item.is-drag-over {
+          transform: translateY(-4px);
+        }
 
         /* Toast */
         .ap-toast {
@@ -1367,34 +1505,16 @@ export default function AdminPage() {
                   return (
                     <div
                       key={u.uid}
-                      data-user-idx={i}
-                      draggable
-                      className={`drag-row${dragOver===i?" drag-over":""}`}
-                      style={{ borderBottom:"1px solid #f3f4f6", padding:"12px 16px", background: dragOver===i?"#eff6ff":undefined }}
-                      onDragStart={e => { e.dataTransfer.effectAllowed="move"; setDragFrom(i); }}
-                      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect="move"; setDragOver(i); }}
-                      onDrop={e => { e.preventDefault(); dropUser(i); }}
-                      onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
-                      onTouchStart={() => { longPressTimer.current = setTimeout(() => setDragFrom(i), 500); }}
-                      onTouchEnd={e => {
-                        clearTimeout(longPressTimer.current!);
-                        if (dragFrom !== null && dragOver !== null) { e.preventDefault(); dropUser(dragOver); }
-                      }}
-                      onTouchMove={e => {
-                        if (dragFrom === null) { clearTimeout(longPressTimer.current!); return; }
-                        const t = e.touches[0];
-                        const el = document.elementFromPoint(t.clientX, t.clientY);
-                        const card = el?.closest("[data-user-idx]") as HTMLElement|null;
-                        if (card) {
-                          const idx = parseInt(card.dataset.userIdx ?? "-1");
-                          if (idx >= 0 && idx !== dragOver) setDragOver(idx);
-                        }
-                      }}
-                      onTouchCancel={() => { clearTimeout(longPressTimer.current!); setDragFrom(null); setDragOver(null); }}
+                      ref={el => { userItemRefs.current[i] = el; }}
+                      className={`drag-item${userDragging===i?" is-dragging":""}${userDragOver===i&&userDragging!==null&&userDragging!==i?" is-drag-over":""}`}
+                      style={{ borderBottom:"1px solid #f3f4f6", padding:"12px 16px" }}
                     >
                       {/* 行 1：把手 | 姓名 | 角色代稱 | 🔑 | 刪除 */}
                       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
-                        <span style={{ color:"#9ca3af", cursor:"grab", fontSize:17, userSelect:"none" }}>☰</span>
+                        <span
+                          className="drag-handle"
+                          onTouchStart={e => handleUserDragHandleTouchStart(e, i)}
+                        >☰</span>
                         <span style={{ fontWeight:700, fontSize:14 }}>{u.name}</span>
                         <code style={{ fontSize:11, background:"#f3f4f6", padding:"1px 6px", borderRadius:4, color:"#6b7280" }}>{u.uid}</code>
                         {canEditRole ? (
@@ -1975,8 +2095,14 @@ export default function AdminPage() {
         ══════════════════════════════════ */}
         {tab === "shifts_cfg" && (() => {
           const shiftRow = (s: ShiftDef, i: number, type: "work"|"off") => (
-            <div key={i} className="shift-edit-row" style={{ borderBottom:"1px solid #f3f4f6", paddingBottom:8, marginBottom:8 }}>
+            <div
+              key={i}
+              ref={el => { (type==="work" ? shiftWorkRefs : shiftOffRefs).current[i] = el; }}
+              className={`shift-edit-row drag-item${shiftDragging?.type===type&&shiftDragging.idx===i?" is-dragging":""}${shiftDragOver?.type===type&&shiftDragOver.idx===i&&shiftDragging?.idx!==i?" is-drag-over":""}`}
+              style={{ borderBottom:"1px solid #f3f4f6", paddingBottom:8, marginBottom:8 }}
+            >
               <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", width:"100%" }}>
+                <span className="drag-handle" onTouchStart={e => handleShiftDragHandleTouchStart(e, type, i)}>☰</span>
                 {/* 代碼 */}
                 <div style={{ flex:"0 0 80px" }}>
                   <div style={{ fontSize:11, color:"#6b7280", marginBottom:2 }}>代碼</div>

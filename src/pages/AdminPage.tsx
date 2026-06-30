@@ -203,8 +203,6 @@ export default function AdminPage() {
   const [ctrlSelected, setCtrlSelected] = useState<Set<string>>(new Set()); // "uid_date"
   const [dragFill, setDragFill] = useState<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
   const dragFillRef = useRef<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
-  const longPressRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressSrc = useRef<{ nurseUid: string; date: string; shift: string } | null>(null);
   const batchSaveRef = useRef(batchSave);
   const touchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPos = useRef<{x: number; y: number}>({x: 0, y: 0});
@@ -224,7 +222,6 @@ export default function AdminPage() {
   useEffect(() => { scheduleRef.current = schedule; }, [schedule]);
   useEffect(() => { shiftAnchorRef.current = shiftAnchor; }, [shiftAnchor]);
   useEffect(() => { batchSaveRef.current = batchSave; });
-  useEffect(() => { allDaysRef.current = allDays; }, [allDays]);
 
   // 帳號管理
   const [newUser, setNewUser] = useState({ uid:"", password:"", name:"", role:"nurse", level:"member", attr:"輪班DEN", halftime:false, note:"" });
@@ -313,6 +310,8 @@ export default function AdminPage() {
     : Array.from({ length: dayjs(ym+"-01").daysInMonth() }, (_, i) =>
         ym + "-" + String(i+1).padStart(2,"0"));
   const allDays = [...refDays, ...cycleDays];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { allDaysRef.current = allDays; });
 
   // 只顯示護理師角色
   const nurseUsers = users.filter(u => ["nurse","dual"].includes(u.role));
@@ -868,21 +867,6 @@ export default function AdminPage() {
   }
 
   // 試算各輪班屬性的預估班別天數
-  // 取得某護理師生效的比例（有個別覆蓋優先，否則用全域）
-  function effectiveRatioFor(uid: string, attr: string): Record<string, number> | null {
-    const ov = ratioOverrides.find(o => o.nurse_uid === uid);
-    if (ov) return ov.ratio;
-    if (attr === "輪班DE") return { D: ratioForm.de_d, E: ratioForm.de_e };
-    if (attr === "輪班EN") return { E: ratioForm.en_e, N: ratioForm.en_n };
-    if (attr === "輪班DN") return { D: ratioForm.dn_d, N: ratioForm.dn_n };
-    if (attr === "輪班DEN") return { D: ratioForm.den_d, E: ratioForm.den_e, N: ratioForm.den_n };
-    return null;
-  }
-
-  function ratioLabel(ratio: Record<string, number>): string {
-    return Object.entries(ratio).map(([k, v]) => `${k}:${v}`).join(" / ");
-  }
-
   // 從屬性取出輪班代碼列表
   function attrShifts(attr: string): string[] {
     if (attr === "輪班DE") return ["D","E"];

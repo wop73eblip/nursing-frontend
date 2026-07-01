@@ -723,7 +723,7 @@ export default function AdminPage() {
     try {
       const { new_password, ...patch } = editForm;
       await api.patch(`/users/${editUser.uid}`, patch);
-      if (new_password && new_password.length >= 6) {
+      if (new_password && new_password.length >= 4) {
         await api.post(`/users/${editUser.uid}/reset-password`, { new_password });
       }
       showToast("✓ 已更新");
@@ -1626,7 +1626,7 @@ export default function AdminPage() {
                     <div>
                       <label className="flabel">初始密碼</label>
                       <div style={{ position:"relative" }}>
-                        <input className="finput" type={showNewPwd ? "text" : "password"} placeholder="至少 6 個字元（大小寫有別）"
+                        <input className="finput" type={showNewPwd ? "text" : "password"} placeholder="至少 4 個字元（大小寫有別）"
                           value={newUser.password} onChange={e => setNewUser(p=>({...p,password:e.target.value}))}
                           style={{ paddingRight:38 }} />
                         <button type="button" onClick={() => setShowNewPwd(p => !p)}
@@ -1634,8 +1634,8 @@ export default function AdminPage() {
                           {showNewPwd ? "🙈" : "👁"}
                         </button>
                       </div>
-                      {newUser.password.length > 0 && newUser.password.length < 6 && (
-                        <div style={{ fontSize:11, color:"#dc2626", marginTop:3 }}>密碼至少 6 個字元</div>
+                      {newUser.password.length > 0 && newUser.password.length < 4 && (
+                        <div style={{ fontSize:11, color:"#dc2626", marginTop:3 }}>密碼至少 4 個字元</div>
                       )}
                     </div>
                     <div>
@@ -1681,7 +1681,7 @@ export default function AdminPage() {
                     <textarea className="finput" placeholder="其他說明" value={newUser.note} onChange={e => setNewUser(p=>({...p,note:e.target.value}))} rows={2} style={{ resize:"vertical", minHeight:52 }} />
                   </div>
                   <button className="btn btn-primary" style={{ alignSelf:"flex-start" }} onClick={createUser}
-                    disabled={creating || !newUser.uid || !newUser.password || !newUser.name || newUser.password.length < 6}>
+                    disabled={creating || !newUser.uid || !newUser.password || !newUser.name || newUser.password.length < 4}>
                     {creating ? "建立中…" : "建立帳號"}
                   </button>
                 </div>
@@ -2453,7 +2453,7 @@ export default function AdminPage() {
                 <label className="flabel">重設密碼（留空則不變更）</label>
                 <div style={{ position:"relative" }}>
                   <input className="finput" type={editForm.showEditPwd ? "text" : "password"}
-                    placeholder="輸入新密碼（至少 6 個字元，大小寫有別）"
+                    placeholder="輸入新密碼（至少 4 個字元，大小寫有別）"
                     value={editForm.new_password ?? ""}
                     onChange={e => setEditForm(p=>({...p,new_password:e.target.value}))}
                     style={{ paddingRight:38 }} />

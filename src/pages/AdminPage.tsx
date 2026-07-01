@@ -201,6 +201,8 @@ export default function AdminPage() {
   // 批次填寫
   const [shiftAnchor, setShiftAnchor] = useState<{ nurseUid: string; date: string; shift: string } | null>(null);
   const [ctrlSelected, setCtrlSelected] = useState<Set<string>>(new Set()); // "uid_date"
+  const [shiftRange, setShiftRange] = useState<Set<string>>(new Set()); // "uid_date" for shift-range highlight
+  const [batchPopup, setBatchPopup] = useState<{ nurseUid: string; nurseName: string; dates: string[] } | null>(null);
   const [dragFill, setDragFill] = useState<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
   const dragFillRef = useRef<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
   const batchSaveRef = useRef(batchSave);
@@ -209,6 +211,7 @@ export default function AdminPage() {
   const touchSrcRef   = useRef<{nurseUid: string; date: string; shift: string} | null>(null);
   // Refs 避免 stale closure（StrictMode / 事件監聽器共用）
   const ctrlSelectedRef = useRef<Set<string>>(new Set());
+  const shiftRangeRef = useRef<Set<string>>(new Set());
   const scheduleRef = useRef<ShiftRow[]>([]);
   const shiftAnchorRef = useRef<{ nurseUid: string; date: string; shift: string } | null>(null);
   // Ctrl+click 時追蹤最後一個被點到的「有班別格子」作為來源
@@ -218,7 +221,15 @@ export default function AdminPage() {
   const allDaysRef = useRef<string[]>([]);
   const [swipeDates, setSwipeDates] = useState<Set<string>>(new Set());
   const [swipePopup, setSwipePopup] = useState<{ nurseUid: string; nurseName: string; dates: string[] } | null>(null);
+  // 捲動速度
+  const [scrollSpeed, setScrollSpeed] = useState<number>(() => Number(localStorage.getItem('scrollSpeed') ?? 10));
+  const autoScrollFrameRef = useRef<number | null>(null);
+  const tableWrapRef = useRef<HTMLDivElement | null>(null);
+  const nurseUsersRef = useRef<User[]>([]);
+  const scrollSpeedRef = useRef<number>(10);
+  useEffect(() => { scrollSpeedRef.current = scrollSpeed; }, [scrollSpeed]);
   useEffect(() => { ctrlSelectedRef.current = ctrlSelected; }, [ctrlSelected]);
+  useEffect(() => { shiftRangeRef.current = shiftRange; }, [shiftRange]);
   useEffect(() => { scheduleRef.current = schedule; }, [schedule]);
   useEffect(() => { shiftAnchorRef.current = shiftAnchor; }, [shiftAnchor]);
   useEffect(() => { batchSaveRef.current = batchSave; });
@@ -325,6 +336,7 @@ export default function AdminPage() {
 
   // 只顯示護理師角色
   const nurseUsers = users.filter(u => ["nurse","dual"].includes(u.role));
+  nurseUsersRef.current = nurseUsers;
 
   // 每日休假人數（只算週期內）
   const dailyOff: Record<string,number> = {};
@@ -342,6 +354,7 @@ export default function AdminPage() {
   // 手機長按拖曳：React onTouchStart 在 span 上啟動計時，
   // 長按觸發後才動態掛 non-passive 的 document.touchmove 阻止頁面捲動。
   function handleCellTouchStart(e: React.TouchEvent<HTMLSpanElement>) {
+    e.preventDefault(); // 阻止文字選取選單
     const span = e.currentTarget;
     const nurseUid = span.dataset.nurseUid;
     const date     = span.dataset.date;
@@ -405,6 +418,24 @@ export default function AdminPage() {
 
       if (swipeStarted && swipeRef.current) {
         ev.preventDefault();
+
+        // 邊緣自動捲動
+        const wrap = tableWrapRef.current;
+        const spd = scrollSpeedRef.current;
+        if (wrap) {
+          if (autoScrollFrameRef.current) cancelAnimationFrame(autoScrollFrameRef.current);
+          const W = window.innerWidth;
+          if (t.clientX > W * 0.8) {
+            const scroll = () => { wrap.scrollLeft += spd; autoScrollFrameRef.current = requestAnimationFrame(scroll); };
+            autoScrollFrameRef.current = requestAnimationFrame(scroll);
+          } else if (t.clientX < W * 0.2) {
+            const scroll = () => { wrap.scrollLeft -= spd; autoScrollFrameRef.current = requestAnimationFrame(scroll); };
+            autoScrollFrameRef.current = requestAnimationFrame(scroll);
+          } else {
+            autoScrollFrameRef.current = null;
+          }
+        }
+
         const el = document.elementFromPoint(t.clientX, t.clientY) as HTMLElement | null;
         if (!el) return;
         const target = (el.dataset.nurseUid ? el : el.closest("[data-nurse-uid]")) as HTMLElement | null;
@@ -430,6 +461,7 @@ export default function AdminPage() {
       document.removeEventListener("touchmove",   nativeMove);
       document.removeEventListener("touchend",    nativeEnd);
       document.removeEventListener("touchcancel", nativeEnd);
+      if (autoScrollFrameRef.current) { cancelAnimationFrame(autoScrollFrameRef.current); autoScrollFrameRef.current = null; }
 
       // 長按拖曳結束
       if (dragFillRef.current) {
@@ -489,14 +521,9 @@ export default function AdminPage() {
     // native handler 接管，React 這邊不需處理
   }
 
-  // Ctrl 放開時批次填入（用 ref 避免 stale closure，不在 setState updater 內呼叫非同步函數）
+  // Ctrl / Shift 放開時顯示批次填入 Popup
   useEffect(() => {
-    function onKeyUp(e: KeyboardEvent) {
-      if (e.key !== "Control" && e.key !== "Meta") return;
-      const sel = ctrlSelectedRef.current;
-      if (!sel.size) return;
-      const cur = scheduleRef.current;
-
+    function parseSel(sel: Set<string>): Map<string, string[]> {
       const byNurse = new Map<string, string[]>();
       for (const key of sel) {
         const idx = key.indexOf("_");
@@ -505,40 +532,45 @@ export default function AdminPage() {
         if (!byNurse.has(uid)) byNurse.set(uid, []);
         byNurse.get(uid)!.push(date);
       }
-      const updates: Array<{ nurse_uid: string; date: string; shift: string }> = [];
-      for (const [uid, dates] of byNurse) {
-        // 優先用「Ctrl 點選過程中點到的有班別格子」
-        let srcShift: string | null = null;
-        if (ctrlSrcShift.current?.nurseUid === uid) {
-          srcShift = ctrlSrcShift.current.shift;
+      return byNurse;
+    }
+
+    function showBatchPopupFor(sel: Set<string>) {
+      if (!sel.size) return;
+      const byNurse = parseSel(sel);
+      if (byNurse.size !== 1) return; // only single-nurse batch supported
+      const [uid, dates] = [...byNurse.entries()][0];
+      const allD = allDaysRef.current;
+      const sorted = allD.filter(d => dates.includes(d));
+      const nurse = nurseUsersRef.current.find(u => u.uid === uid);
+      setBatchPopup({ nurseUid: uid, nurseName: nurse?.name ?? uid, dates: sorted });
+    }
+
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.key === "Control" || e.key === "Meta") {
+        const sel = ctrlSelectedRef.current;
+        if (sel.size) {
+          showBatchPopupFor(sel);
         }
-        // 若沒點到有班別格子，改用「選取範圍最早日期之前最近的有班別格子」
-        if (!srcShift) {
-          const sortedDates = [...dates].sort();
-          const earliest = sortedDates[0];
-          const before = cur
-            .filter(r => r.nurse_uid === uid && r.shift && r.date < earliest)
-            .sort((a, b) => b.date.localeCompare(a.date)); // 由近到遠
-          srcShift = before[0]?.shift ?? null;
-        }
-        if (!srcShift) continue;
-        const finalShift = srcShift;
-        dates.forEach(d => {
-          if (!cur.find(r => r.nurse_uid===uid && r.date===d)?.shift)
-            updates.push({ nurse_uid: uid, date: d, shift: finalShift });
-        });
+        ctrlSrcShift.current = null;
+        return;
       }
-      ctrlSrcShift.current = null; // 清除 Ctrl 來源
-      setCtrlSelected(new Set());          // 先清選取狀態
-      if (updates.length > 0) batchSave(updates);
+      if (e.key === "Shift") {
+        const sel = shiftRangeRef.current;
+        if (sel.size) {
+          showBatchPopupFor(sel);
+        }
+        return;
+      }
     }
     window.addEventListener("keyup", onKeyUp);
     return () => window.removeEventListener("keyup", onKeyUp);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function fetchUsers() {
     try { const { data } = await api.get("/users"); setUsers(data.users ?? []); }
-    catch {}
+    catch (err: any) { showToast("✗ 載入帳號失敗：" + (err.response?.data?.detail ?? err.message), false); }
   }
   async function fetchSchedule() {
     try {
@@ -1192,7 +1224,8 @@ export default function AdminPage() {
         .ap-cell.is-saving { opacity: .3; pointer-events: none; }
         .ap-cell.is-empty { color: #d1d5db; font-size: 17px; font-weight: 300; }
         .ap-cell.is-empty:hover { background: #f0f7ff; color: #6b7280; border-color: #bfdbfe; filter: none; }
-        .ap-cell.is-ctrl-sel  { outline: 2px solid #7c3aed; outline-offset: 1px; filter: none; }
+        .ap-cell.is-ctrl-sel  { outline: 2px solid #7c3aed; background: #ede9fe !important; filter: none; }
+        .ap-cell.is-shift-sel { outline: 2px solid #2563eb; background: #dbeafe !important; color: #1e3a8a !important; filter: none; }
         .ap-cell.is-drag-fill  { outline: 2.5px solid #2563eb; outline-offset: 1px; background: #dbeafe !important; color: #1e40af !important; filter: none; }
         .ap-cell.is-swipe-sel  { outline: 2.5px solid #0891b2; outline-offset: 1px; background: #cffafe !important; color: #164e63 !important; filter: none; }
         .ap-cell.is-anchor    { outline: 2px solid #2563eb; outline-offset: 1px; filter: none; }
@@ -1248,6 +1281,14 @@ export default function AdminPage() {
         }
         .drag-item.is-drag-over {
           transform: translateY(-4px);
+        }
+
+        /* 橫向模式縮小格子 */
+        @media (orientation: landscape) and (max-width: 1024px) {
+          .ap-cell { width: 26px !important; height: 24px !important; font-size: 10px !important; }
+          .ap-th-day { min-width: 30px !important; width: 30px !important; font-size: 9px !important; padding: 4px 1px !important; }
+          .ap-td-shift { padding: 1px !important; }
+          .sticky-name { font-size: 10px !important; min-width: 50px !important; max-width: 50px !important; }
         }
 
         /* Toast */
@@ -1337,8 +1378,21 @@ export default function AdminPage() {
               </span>
             </div>
 
+            {/* 捲動速度選擇器 */}
+            <div style={{ display:"flex", alignItems:"center", gap:4, justifyContent:"flex-end", padding:"4px 8px 2px" }}>
+              <span style={{ fontSize:11, color:"#9ca3af" }}>捲動速度</span>
+              {([{l:"🐢",v:3},{l:"慢",v:6},{l:"中",v:10},{l:"快",v:14},{l:"🐇",v:18}] as {l:string;v:number}[]).map(({l,v})=>(
+                <button key={v} onClick={()=>{setScrollSpeed(v);localStorage.setItem("scrollSpeed",String(v));}}
+                  style={{ padding:"2px 7px", borderRadius:5, border:"1px solid #e5e7eb", fontSize:12, cursor:"pointer",
+                    background:scrollSpeed===v?"#16a34a":"#f9fafb", color:scrollSpeed===v?"#fff":"#374151",
+                    fontWeight:scrollSpeed===v?700:400, lineHeight:1.4 }}>
+                  {l}
+                </button>
+              ))}
+            </div>
+
             {/* 表格 */}
-            <div style={{ overflowX:"auto", WebkitOverflowScrolling:"touch" }}>
+            <div ref={tableWrapRef} style={{ overflowX:"auto", WebkitOverflowScrolling:"touch", userSelect:"none", WebkitUserSelect:"none" as any }}>
               <table className="tbl">
                 <thead>
                   {/* 分段標題列（只在有週期時顯示） */}
@@ -1385,53 +1439,60 @@ export default function AdminPage() {
                         const isRef = refDays.includes(d);
                         const row = schedule.find(r => r.nurse_uid===u.uid && r.date===d);
                         const key = `${u.uid}_${d}`;
-                        const isCtrlSel  = ctrlSelected.has(key);
-                        const isDragFill = dragFill?.nurseUid === u.uid && dragFill.dates.has(d);
-                        const isSwipeSel = swipeDates.has(d) && (swipeRef.current?.nurseUid === u.uid || swipePopup?.nurseUid === u.uid);
-                        const isAnchor = shiftAnchor?.nurseUid === u.uid && shiftAnchor.date === d;
+                        const isCtrlSel   = ctrlSelected.has(key);
+                        const isShiftSel  = shiftRange.has(key);
+                        const isDragFill  = dragFill?.nurseUid === u.uid && dragFill.dates.has(d);
+                        const isSwipeSel  = swipeDates.has(d) && (swipeRef.current?.nurseUid === u.uid || swipePopup?.nurseUid === u.uid);
+                        const isAnchor    = shiftAnchor?.nurseUid === u.uid && shiftAnchor.date === d && !shiftRange.size && !ctrlSelected.size;
                         const { cls: baseCls, style } = cellStyle(row?.shift, row?.confirmed, saving.has(key));
                         const cls = baseCls
-                          + (isCtrlSel  ? " is-ctrl-sel"  : "")
-                          + (isDragFill ? " is-drag-fill" : "")
-                          + (isSwipeSel ? " is-swipe-sel" : "")
-                          + (isAnchor   ? " is-anchor"    : "");
+                          + (isCtrlSel   ? " is-ctrl-sel"   : "")
+                          + (isShiftSel  ? " is-shift-sel"  : "")
+                          + (isDragFill  ? " is-drag-fill"  : "")
+                          + (isSwipeSel  ? " is-swipe-sel"  : "")
+                          + (isAnchor    ? " is-anchor"     : "");
                         const refStyle: React.CSSProperties = isRef
                           ? { opacity: row?.shift ? 0.55 : 0.35, background: row?.shift ? undefined : "#f3f4f6" }
                           : {};
 
                         function handleClick(e: React.MouseEvent) {
-                          // Ctrl / Meta：切換選取（不開 popup）
+                          // Ctrl / Meta：切換選取（放開 Ctrl 才跳 popup）
                           if (e.ctrlKey || e.metaKey) {
                             e.preventDefault();
-                            // 若點到有班別的格子，記錄為 Ctrl 來源班別
-                            if (row?.shift) {
-                              ctrlSrcShift.current = { nurseUid: u.uid, shift: row.shift };
-                            }
                             setCtrlSelected(prev => {
                               const next = new Set(prev);
+                              // 同一護理師才能加入，不同護理師清空重選
+                              const firstKey = [...next][0];
+                              const firstUid = firstKey ? firstKey.slice(0, firstKey.indexOf("_")) : null;
+                              if (firstUid && firstUid !== u.uid) next.clear();
                               if (next.has(key)) next.delete(key); else next.add(key);
                               return next;
                             });
+                            setShiftRange(new Set()); // 清除 shift range
                             return;
                           }
-                          // Shift：範圍填入（從 ref 讀錨點，避免 stale closure）
-                          const anchor = shiftAnchorRef.current;
-                          if (e.shiftKey && anchor && anchor.nurseUid === u.uid) {
+                          // Shift：設定高亮範圍（放開 Shift 才跳 popup）
+                          if (e.shiftKey) {
                             e.preventDefault();
-                            const ai = allDays.indexOf(anchor.date);
-                            const ti = allDays.indexOf(d);
-                            const [from, to] = ai <= ti ? [ai, ti] : [ti, ai];
-                            const cur = scheduleRef.current;
-                            const updates = allDays
-                              .slice(from, to + 1)
-                              .filter(dd => !cur.find(r => r.nurse_uid===u.uid && r.date===dd)?.shift)
-                              .map(dd => ({ nurse_uid: u.uid, date: dd, shift: anchor.shift }));
-                            batchSave(updates);
-                            // 保留錨點，讓使用者可以繼續 Shift+click 延伸範圍
+                            const anchor = shiftAnchorRef.current;
+                            if (anchor && anchor.nurseUid === u.uid) {
+                              const ai = allDays.indexOf(anchor.date);
+                              const ti = allDays.indexOf(d);
+                              const [from, to] = ai <= ti ? [ai, ti] : [ti, ai];
+                              const range = new Set(allDays.slice(from, to + 1).map(dd => `${u.uid}_${dd}`));
+                              setShiftRange(range);
+                            } else {
+                              // 沒有錨點：把此格設為錨點並開始 range
+                              setShiftAnchor({ nurseUid: u.uid, date: d, shift: row?.shift ?? "" });
+                              setShiftRange(new Set([key]));
+                            }
+                            setCtrlSelected(new Set()); // 清除 ctrl 選取
                             return;
                           }
-                          // 一般點擊：有班別才更新錨點（不因點空格清掉錨點）
-                          if (row?.shift) setShiftAnchor({ nurseUid: u.uid, date: d, shift: row.shift });
+                          // 一般點擊：清除批次選取，設錨點，開 popup
+                          setCtrlSelected(new Set());
+                          setShiftRange(new Set());
+                          setShiftAnchor({ nurseUid: u.uid, date: d, shift: row?.shift ?? "" });
                           setPopup({ date: d, nurseUid: u.uid, nurseName: u.name });
                         }
 
@@ -2520,6 +2581,24 @@ export default function AdminPage() {
             { label: "取消", onClick: () => setAttrChangeWarn(null) },
             { label: "仍要變更", primary: true, onClick: confirmAttrChange },
           ]}
+        />
+      )}
+
+      {/* ── Ctrl / Shift 批次填入 popup */}
+      {batchPopup && (
+        <SwipeRangePopup
+          nurseName={batchPopup.nurseName}
+          dates={batchPopup.dates}
+          workShifts={workShifts}
+          offShifts={offShifts}
+          onSelect={async (shift) => {
+            const updates = batchPopup.dates.map(d => ({ nurse_uid: batchPopup.nurseUid, date: d, shift }));
+            setBatchPopup(null);
+            setCtrlSelected(new Set());
+            setShiftRange(new Set());
+            await batchSave(updates);
+          }}
+          onClose={() => { setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set()); }}
         />
       )}
 

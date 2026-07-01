@@ -229,6 +229,21 @@ export default function NursePage() {
   const [swipeDates, setSwipeDates] = useState<Set<string>>(new Set());
   const [swipePopup, setSwipePopup] = useState<{ dates: string[] } | null>(null);
 
+  // Ctrl / Shift 批次選取
+  const [shiftAnchor, setShiftAnchor] = useState<{ date: string; shift: string } | null>(null);
+  const [ctrlSelected, setCtrlSelected] = useState<Set<string>>(new Set());
+  const [shiftRange, setShiftRange] = useState<Set<string>>(new Set());
+  const [batchPopup, setBatchPopup] = useState<{ dates: string[] } | null>(null);
+  const shiftAnchorRef = useRef<{ date: string; shift: string } | null>(null);
+  const ctrlSelectedRef = useRef<Set<string>>(new Set());
+  const shiftRangeRef = useRef<Set<string>>(new Set());
+
+  // 捲動速度
+  const [scrollSpeed, setScrollSpeed] = useState<number>(() => Number(localStorage.getItem("scrollSpeed") ?? 10));
+  const scrollSpeedRef = useRef<number>(10);
+  const autoScrollFrameRef = useRef<number | null>(null);
+  const tableWrapRef = useRef<HTMLDivElement | null>(null);
+
   // 個人設定
   const [attr, setAttr] = useState("");
   const [note, setNote] = useState("");
@@ -268,6 +283,10 @@ export default function NursePage() {
 
   useEffect(() => { loadAll(); }, [ym]);
   useEffect(() => { daysRef.current = days; }, [days]);
+  useEffect(() => { ctrlSelectedRef.current = ctrlSelected; }, [ctrlSelected]);
+  useEffect(() => { shiftRangeRef.current = shiftRange; }, [shiftRange]);
+  useEffect(() => { scrollSpeedRef.current = scrollSpeed; }, [scrollSpeed]);
+  useEffect(() => { shiftAnchorRef.current = shiftAnchor; }, [shiftAnchor]);
 
   async function loadAll() {
     try {
@@ -332,7 +351,29 @@ export default function NursePage() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [hasUnconfirmed]);
 
+  useEffect(() => {
+    function showBatchPopupFor(sel: Set<string>) {
+      const sorted = daysRef.current.filter(d => sel.has(d));
+      if (sorted.length) setBatchPopup({ dates: sorted });
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.key === "Control" || e.key === "Meta") {
+        const sel = ctrlSelectedRef.current;
+        if (sel.size) showBatchPopupFor(sel);
+        return;
+      }
+      if (e.key === "Shift") {
+        const sel = shiftRangeRef.current;
+        if (sel.size) showBatchPopupFor(sel);
+        return;
+      }
+    }
+    window.addEventListener("keyup", onKeyUp);
+    return () => window.removeEventListener("keyup", onKeyUp);
+  }, []);
+
   function handleCellTouchStart(e: React.TouchEvent<HTMLSpanElement>, date: string) {
+    e.preventDefault();
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
 
@@ -379,6 +420,23 @@ export default function NursePage() {
         const rangeSet = new Set(allD.slice(lo, hi + 1));
         swipeRef.current.dates = rangeSet;
         setSwipeDates(new Set(rangeSet));
+
+        // 自動捲動
+        const wrap = tableWrapRef.current;
+        const spd = scrollSpeedRef.current;
+        if (wrap) {
+          if (autoScrollFrameRef.current) cancelAnimationFrame(autoScrollFrameRef.current);
+          const W = window.innerWidth;
+          if (t.clientX > W * 0.8) {
+            const scroll = () => { wrap.scrollLeft += spd; autoScrollFrameRef.current = requestAnimationFrame(scroll); };
+            autoScrollFrameRef.current = requestAnimationFrame(scroll);
+          } else if (t.clientX < W * 0.2) {
+            const scroll = () => { wrap.scrollLeft -= spd; autoScrollFrameRef.current = requestAnimationFrame(scroll); };
+            autoScrollFrameRef.current = requestAnimationFrame(scroll);
+          } else {
+            autoScrollFrameRef.current = null;
+          }
+        }
       }
     }
 
@@ -386,6 +444,7 @@ export default function NursePage() {
       document.removeEventListener("touchmove",   nativeMove);
       document.removeEventListener("touchend",    nativeEnd);
       document.removeEventListener("touchcancel", nativeEnd);
+      if (autoScrollFrameRef.current) { cancelAnimationFrame(autoScrollFrameRef.current); autoScrollFrameRef.current = null; }
 
       if (swipeStarted && swipeRef.current && swipeRef.current.dates.size >= 2) {
         ev.preventDefault();
@@ -595,7 +654,9 @@ export default function NursePage() {
         .cell-span.readonly { cursor: default; pointer-events: none; }
         .cell-span:not(.readonly):hover { filter: brightness(.93); }
         .cell-span.is-saving   { opacity: .3; pointer-events: none; }
-        .cell-span.is-swipe-sel { outline: 2.5px solid #0891b2; outline-offset: 1px; background: #cffafe !important; color: #164e63 !important; filter: none; }
+        .cell-span.is-swipe-sel  { outline: 2.5px solid #0891b2; outline-offset: 1px; background: #cffafe !important; color: #164e63 !important; filter: none; }
+        .cell-span.is-ctrl-sel   { outline: 2px solid #7c3aed; background: #ede9fe !important; filter: none; }
+        .cell-span.is-shift-sel  { outline: 2px solid #2563eb; background: #dbeafe !important; color: #1e3a8a !important; filter: none; }
         .cell-span.is-empty  { color: #d1d5db; font-weight: 300; font-size: 17px; border-color: transparent; }
         .cell-span.is-empty:not(.readonly):hover { background: #f8fafc; border-color: #e5e7eb; color: #6b7280; filter: none; }
         .cell-span.ro-empty  { color: transparent; pointer-events: none; border-color: transparent; cursor: default; }
@@ -649,6 +710,12 @@ export default function NursePage() {
           .cell-span { width: 28px; height: 26px; font-size: 11px; }
           .np-body { padding: 10px 8px 80px; }
           .xbtn-purple { font-size: 12px; padding: 6px 9px; }
+        }
+        @media (orientation: landscape) and (max-width: 1024px) {
+          .cell-span { width: 26px !important; height: 24px !important; font-size: 10px !important; }
+          .th-day { min-width: 30px !important; width: 30px !important; font-size: 9px !important; padding: 4px 1px !important; }
+          .td-shift { padding: 1px !important; }
+          .th-name, .td-name, .td-name-off { font-size: 10px !important; min-width: 50px !important; width: 50px !important; }
         }
       `}</style>
 
@@ -705,8 +772,21 @@ export default function NursePage() {
             <span className="legend-dot"><span className="legend-box" style={{ background: "#fef9c3", borderColor: "#eab308" }} />屬性不符提示</span>
           </div>
 
+          {/* 捲動速度選擇器 */}
+          <div style={{ display:"flex", alignItems:"center", gap:4, justifyContent:"flex-end", padding:"4px 8px 2px" }}>
+            <span style={{ fontSize:11, color:"#9ca3af" }}>捲動速度</span>
+            {([{l:"🐢",v:3},{l:"慢",v:6},{l:"中",v:10},{l:"快",v:14},{l:"🐇",v:18}] as {l:string;v:number}[]).map(({l,v})=>(
+              <button key={v} onClick={()=>{setScrollSpeed(v);localStorage.setItem("scrollSpeed",String(v));}}
+                style={{ padding:"2px 7px", borderRadius:5, border:"1px solid #e5e7eb", fontSize:12, cursor:"pointer",
+                  background:scrollSpeed===v?"#16a34a":"#f9fafb", color:scrollSpeed===v?"#fff":"#374151",
+                  fontWeight:scrollSpeed===v?700:400, lineHeight:1.4 }}>
+                {l}
+              </button>
+            ))}
+          </div>
+
           {/* 表格 */}
-          <div className="tbl-scroll">
+          <div className="tbl-scroll" ref={tableWrapRef} style={{ userSelect:"none", WebkitUserSelect:"none" }}>
             <table className="tbl">
               <thead>
                 <tr>
@@ -751,15 +831,48 @@ export default function NursePage() {
                           : "點擊填入班別";
 
                         const isSwipeSel = swipeDates.has(d) && (swipeRef.current !== null || swipePopup !== null);
+                        const isCtrlSel  = isMe && ctrlSelected.has(d);
+                        const isShiftSel = isMe && shiftRange.has(d);
                         const swipeCls = isSwipeSel ? " is-swipe-sel" : "";
+                        const ctrlShiftCls = (isCtrlSel ? " is-ctrl-sel" : "") + (isShiftSel ? " is-shift-sel" : "");
 
                         return (
                           <td key={d} className="td-shift">
                             <span
-                              className={finalCls + swipeCls}
+                              className={finalCls + swipeCls + ctrlShiftCls}
                               style={style}
                               data-date={isMe ? d : undefined}
-                              onClick={isMe && !isSuperAdmin ? () => openCell(d) : undefined}
+                              onClick={isMe && !isSuperAdmin ? (e) => {
+                                if (e.ctrlKey || e.metaKey) {
+                                  e.preventDefault();
+                                  setCtrlSelected(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(d)) next.delete(d); else next.add(d);
+                                    return next;
+                                  });
+                                  setShiftRange(new Set());
+                                  return;
+                                }
+                                if (e.shiftKey) {
+                                  e.preventDefault();
+                                  const anchor = shiftAnchorRef.current;
+                                  if (anchor) {
+                                    const ai = days.indexOf(anchor.date);
+                                    const ti = days.indexOf(d);
+                                    const [from, to] = ai <= ti ? [ai, ti] : [ti, ai];
+                                    setShiftRange(new Set(days.slice(from, to + 1)));
+                                  } else {
+                                    setShiftAnchor({ date: d, shift: mySchedule[d]?.shift ?? "" });
+                                    setShiftRange(new Set([d]));
+                                  }
+                                  setCtrlSelected(new Set());
+                                  return;
+                                }
+                                setCtrlSelected(new Set());
+                                setShiftRange(new Set());
+                                setShiftAnchor({ date: d, shift: mySchedule[d]?.shift ?? "" });
+                                openCell(d);
+                              } : undefined}
                               onTouchStart={isMe && !isSuperAdmin ? (e) => handleCellTouchStart(e, d) : undefined}
                               title={title}
                             >
@@ -857,6 +970,48 @@ export default function NursePage() {
         </div>
 
       </div>
+
+      {/* ── 批次選取 popup (Ctrl / Shift) */}
+      {batchPopup && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)",
+          zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+        }} onPointerDown={e => { if (e.target === e.currentTarget) { setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set()); } }}>
+          <div style={{
+            background: "#fff", borderRadius: 14, padding: "16px 16px 14px",
+            width: "100%", maxWidth: 300, boxShadow: "0 16px 48px rgba(0,0,0,.22)",
+            userSelect: "none",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>批次填入</span>
+              <button onClick={() => { setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set()); }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: 18, lineHeight: 1, padding: 2 }}>×</button>
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
+              {batchPopup.dates[0]} ～ {batchPopup.dates[batchPopup.dates.length - 1]}（{batchPopup.dates.length} 天）
+            </div>
+            <div style={{ fontSize: 11, color: "#374151", fontWeight: 700, marginBottom: 6 }}>上班</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+              {workShifts.map(s => (
+                <button key={s} onClick={() => batchSwipeSave(batchPopup.dates, s).then(() => { setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set()); })} style={{
+                  padding: "5px 14px", borderRadius: 7, fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit", border: "1.5px solid #e5e7eb",
+                  background: "#f9fafb", color: "#111827",
+                }}>{s}</button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginBottom: 6 }}>放假 / 調整</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {offShifts.map(s => (
+                <button key={s} onClick={() => batchSwipeSave(batchPopup.dates, s).then(() => { setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set()); })} style={{
+                  padding: "5px 14px", borderRadius: 7, fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit", border: "1.5px solid #fecaca",
+                  background: "#fff5f5", color: "#dc2626",
+                }}>{s}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 班別 Popup */}
       {/* ── 滑動選取 popup */}

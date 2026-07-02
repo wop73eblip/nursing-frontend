@@ -208,6 +208,7 @@ export default function NursePage() {
   const [ym, setYm] = useState(dayjs().format("YYYY-MM"));
   const [workShifts, setWorkShifts] = useState<string[]>(DEFAULT_WORK);
   const [offShifts, setOffShifts]   = useState<string[]>(DEFAULT_OFF);
+  const [cycleRange, setCycleRange]  = useState<{ start: string; end: string } | null>(null);
 
   // 全員資料
   const [nurses, setNurses] = useState<NurseInfo[]>([]);
@@ -255,10 +256,26 @@ export default function NursePage() {
 
   const year  = parseInt(ym.slice(0, 4));
   const month = parseInt(ym.slice(5, 7));
-  const days  = Array.from(
-    { length: dayjs(ym + "-01").daysInMonth() },
-    (_, i) => ym + "-" + String(i + 1).padStart(2, "0")
-  );
+  const days: string[] = cycleRange
+    ? (() => {
+        const result: string[] = [];
+        let d = dayjs(cycleRange.start);
+        const end = dayjs(cycleRange.end);
+        while (!d.isAfter(end)) { result.push(d.format("YYYY-MM-DD")); d = d.add(1, "day"); }
+        return result;
+      })()
+    : Array.from(
+        { length: dayjs(ym + "-01").daysInMonth() },
+        (_, i) => ym + "-" + String(i + 1).padStart(2, "0")
+      );
+
+  const DOW_ZH_NP = ["週日","週一","週二","週三","週四","週五","週六"];
+  const cycleTitleLabel = cycleRange
+    ? (() => {
+        const s = dayjs(cycleRange.start), e = dayjs(cycleRange.end);
+        return `${s.year()}年　${s.format("M/DD")}（${DOW_ZH_NP[s.day()]}）－ ${e.format("M/DD")}（${DOW_ZH_NP[e.day()]}）`;
+      })()
+    : `${year}年 ${month}月`;
 
   // 我自己的班表
   const mySchedule = allSched[user.uid] ?? {};
@@ -290,16 +307,42 @@ export default function NursePage() {
 
   async function loadAll() {
     try {
-      const [usersRes, schedRes, rulesRes] = await Promise.all([
+      const [usersRes, rulesRes] = await Promise.all([
         api.get("/users"),
-        api.get("/schedule", { params: { year, month } }),
         api.get("/rules"),
       ]);
 
-      // 載入自訂班別
+      // 載入自訂班別 & 週期
       const r = rulesRes.data.rules ?? {};
       if (r.shifts?.work) setWorkShifts(r.shifts.work.map((s: any) => s.code));
       if (r.shifts?.off)  setOffShifts(r.shifts.off.map((s: any) => s.code));
+
+      let cycleStart = r.cycle?.start_date ?? "";
+      let cycleEnd   = r.cycle?.end_date   ?? "";
+      if (cycleStart && cycleEnd) {
+        setCycleRange({ start: cycleStart, end: cycleEnd });
+      } else {
+        setCycleRange(null);
+        cycleStart = ""; cycleEnd = "";
+      }
+
+      // 決定要拉哪幾個月的班表
+      const monthsToFetch: { year: number; month: number }[] = cycleStart && cycleEnd
+        ? (() => {
+            const months = new Map<string, { year: number; month: number }>();
+            let d = dayjs(cycleStart);
+            while (!d.isAfter(dayjs(cycleEnd))) {
+              months.set(d.format("YYYY-MM"), { year: d.year(), month: d.month() + 1 });
+              d = d.add(1, "month").startOf("month");
+            }
+            return Array.from(months.values());
+          })()
+        : [{ year, month }];
+
+      const schedResults = await Promise.all(
+        monthsToFetch.map(({ year: y, month: m }) => api.get("/schedule", { params: { year: y, month: m } }))
+      );
+      const schedRes = { data: { schedule: schedResults.flatMap(res => res.data.schedule ?? []) } };
 
       const nurseList: NurseInfo[] = (usersRes.data.users ?? [])
         .filter((u: any) => ["nurse", "dual"].includes(u.role))
@@ -464,19 +507,20 @@ export default function NursePage() {
     document.addEventListener("touchcancel", nativeEnd);
   }
 
-  async function batchSwipeSave(dates: string[], shift: string) {
+  async function batchSwipeSave(dates: string[], shift: string | null) {
     setSwipePopup(null);
     setSwipeDates(new Set());
     for (const d of dates) {
       const prev = mySchedule[d] ?? null;
       setAllSched(cur => {
         const myMap = { ...(cur[user.uid] ?? {}) };
-        myMap[d] = { shift, confirmed: false };
+        if (shift) myMap[d] = { shift, confirmed: false };
+        else delete myMap[d];
         return { ...cur, [user.uid]: myMap };
       });
       setSaving(s => new Set(s).add(d));
       try {
-        await api.post("/schedule/shift", { nurse_uid: user.uid, date: d, shift });
+        await api.post("/schedule/shift", { nurse_uid: user.uid, date: d, shift: shift ?? null });
       } catch {
         setAllSched(cur => {
           const myMap = { ...(cur[user.uid] ?? {}) };
@@ -487,7 +531,7 @@ export default function NursePage() {
         setSaving(s => { const n = new Set(s); n.delete(d); return n; });
       }
     }
-    showToast(`✓ 已批次填入 ${dates.length} 格`);
+    showToast(shift ? `✓ 已批次填入 ${dates.length} 格` : `✓ 已清除 ${dates.length} 格`);
   }
 
   function openCell(date: string) {
@@ -741,12 +785,15 @@ export default function NursePage() {
         <div className="xcard">
           <div className="month-bar">
             <div>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>本月預班表</div>
+              <div style={{ fontSize: 15, fontWeight: 700 }}>本期預班表</div>
+              <div style={{ fontSize: 13, color: "#374151", fontWeight: 600, marginTop: 2 }}>{cycleTitleLabel}</div>
               <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
                 藍色列為您的班表，點格子可填寫；其他同事為唯讀
               </div>
             </div>
-            <input type="month" value={ym} onChange={e => setYm(e.target.value)} />
+            {!cycleRange && (
+              <input type="month" value={ym} onChange={e => setYm(e.target.value)} />
+            )}
           </div>
 
           {/* 我的統計 */}
@@ -1000,7 +1047,7 @@ export default function NursePage() {
               ))}
             </div>
             <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginBottom: 6 }}>放假 / 調整</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
               {offShifts.map(s => (
                 <button key={s} onClick={() => batchSwipeSave(batchPopup.dates, s).then(() => { setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set()); })} style={{
                   padding: "5px 14px", borderRadius: 7, fontSize: 13, fontWeight: 600,
@@ -1008,6 +1055,12 @@ export default function NursePage() {
                   background: "#fff5f5", color: "#dc2626",
                 }}>{s}</button>
               ))}
+            </div>
+            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
+              <button onClick={() => batchSwipeSave(batchPopup.dates, null).then(() => { setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set()); })} style={{
+                width: "100%", padding: "6px", background: "none", border: "none",
+                color: "#9ca3af", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+              }}>✕ 清除選取日期的班別</button>
             </div>
           </div>
         </div>
@@ -1043,7 +1096,7 @@ export default function NursePage() {
               ))}
             </div>
             <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginBottom: 6 }}>放假 / 調整</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
               {offShifts.map(s => (
                 <button key={s} onClick={() => batchSwipeSave(swipePopup.dates, s)} style={{
                   padding: "5px 14px", borderRadius: 7, fontSize: 13, fontWeight: 600,
@@ -1051,6 +1104,12 @@ export default function NursePage() {
                   background: "#fff5f5", color: "#dc2626",
                 }}>{s}</button>
               ))}
+            </div>
+            <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
+              <button onClick={() => batchSwipeSave(swipePopup.dates, null)} style={{
+                width: "100%", padding: "6px", background: "none", border: "none",
+                color: "#9ca3af", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+              }}>✕ 清除選取日期的班別</button>
             </div>
           </div>
         </div>

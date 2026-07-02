@@ -126,7 +126,7 @@ function SwipeRangePopup({
   dates: string[];
   workShifts: ShiftDef[];
   offShifts: ShiftDef[];
-  onSelect: (shift: string) => void;
+  onSelect: (shift: string | null) => void;
   onClose: () => void;
 }) {
   const first = dates[0], last = dates[dates.length - 1];
@@ -162,10 +162,16 @@ function SwipeRangePopup({
           ))}
         </div>
         <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginBottom: 6 }}>放假 / 調整</div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
           {offShifts.map(s => (
             <button key={s.code} onClick={() => onSelect(s.code)} style={{ ...btnBase, color: "#dc2626", borderColor: "#fecaca", background: "#fff5f5" }}>{s.code}</button>
           ))}
+        </div>
+        <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
+          <button onClick={() => onSelect(null)} style={{
+            width: "100%", padding: "6px", background: "none", border: "none",
+            color: "#9ca3af", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+          }}>✕ 清除選取日期的班別</button>
         </div>
       </div>
     </div>
@@ -300,6 +306,13 @@ export default function AdminPage() {
   const cycleIsSet = !!(cycle.start_date && cycle.end_date);
   const fullTimeOff = Math.min(8 + cycle.holiday_days, 13);
   const partTimeOff = Math.min(16 + cycle.holiday_days, 21);
+  const DOW_ZH = ["週日","週一","週二","週三","週四","週五","週六"];
+  const cycleTitleLabel = cycleIsSet
+    ? (() => {
+        const s = dayjs(cycle.start_date), e = dayjs(cycle.end_date);
+        return `${s.year()}年　${s.format("M/DD")}（${DOW_ZH[s.day()]}）－ ${e.format("M/DD")}（${DOW_ZH[e.day()]}）`;
+      })()
+    : "";
 
   // 產生日期陣列
   function dateRange(from: string, to: string): string[] {
@@ -666,10 +679,9 @@ export default function AdminPage() {
     }
   }
 
-  // ── 批次儲存（Shift/Ctrl/拖曳共用）
-  async function batchSave(updates: Array<{ nurse_uid: string; date: string; shift: string }>) {
+  // ── 批次儲存（Shift/Ctrl/滑動共用，shift=null 表示清除）
+  async function batchSave(updates: Array<{ nurse_uid: string; date: string; shift: string | null }>) {
     if (!updates.length) return;
-    // 去重：同一格子只保留最後一筆
     const deduped = Array.from(
       new Map(updates.map(u => [`${u.nurse_uid}_${u.date}`, u])).values()
     );
@@ -680,7 +692,7 @@ export default function AdminPage() {
       let next = [...prev];
       for (const u of deduped) {
         next = next.filter(r => !(r.nurse_uid===u.nurse_uid && r.date===u.date));
-        next.push({ nurse_uid: u.nurse_uid, date: u.date, shift: u.shift, confirmed: false });
+        if (u.shift) next.push({ nurse_uid: u.nurse_uid, date: u.date, shift: u.shift, confirmed: false });
       }
       return next;
     });
@@ -1333,7 +1345,7 @@ export default function AdminPage() {
                 <div style={{ fontSize:16, fontWeight:700 }}>手動填寫班表</div>
                 <div style={{ fontSize:12, color:"#9ca3af", marginTop:2 }}>
                   {cycleIsSet
-                    ? `週期：${cycle.start_date} ～ ${cycle.end_date}（灰色欄為上週參考，護理師不可見）`
+                    ? <>{cycleTitleLabel}　<span style={{ color:"#d1d5db" }}>灰色欄為上週參考，護理師不可見</span></>
                     : "點格子選擇班別，填完後「確認送出」"}
                 </div>
               </div>

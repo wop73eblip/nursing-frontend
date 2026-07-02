@@ -1743,7 +1743,7 @@ export default function AdminPage() {
                       />
 
                       {/* ── 底部：儲存按鈕靠右 100px */}
-                      <div style={{ display:"flex", justifyContent:"flex-end" }}>
+                      <div style={{ display:"flex", justifyContent:"flex-start" }}>
                         <button
                           disabled={!isDirty || isSavingThis}
                           onClick={() => saveUserCard(u)}

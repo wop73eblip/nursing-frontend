@@ -23,7 +23,6 @@ const DEFAULT_OFF: ShiftDef[] = [
   { code: "補休", label: "補休", type: "off", admin_only: true },
   { code: "調移", label: "調移", type: "off", admin_only: true },
 ];
-const DOW_ZH = ["日","一","二","三","四","五","六"];
 const ROLE_ABBR:   Record<string,string> = { nurse:"護", dual:"兼", admin:"管", superadmin:"超" };
 
 // ─── Types
@@ -37,6 +36,36 @@ interface User {
 interface ShiftRow { nurse_uid: string; date: string; shift: string; confirmed?: boolean; }
 
 function isOff(code: string, offShifts: ShiftDef[]) { return offShifts.some(s => s.code === code); }
+
+// Number input that allows backspace without jumping to 0
+function NumInput({ value, min, max, onChange, className, style }: {
+  value: number; min?: number; max?: number;
+  onChange: (n: number) => void;
+  className?: string; style?: React.CSSProperties;
+}) {
+  const [raw, setRaw] = useState(String(value));
+  useEffect(() => { setRaw(String(value)); }, [value]);
+  return (
+    <input
+      type="text" inputMode="numeric" pattern="[0-9]*"
+      className={className} style={style}
+      value={raw}
+      onChange={e => {
+        const v = e.target.value.replace(/[^0-9]/g, "");
+        setRaw(v);
+        if (v === "") return;
+        const n = parseInt(v, 10);
+        if (!isNaN(n)) onChange(Math.min(max ?? 9999, Math.max(min ?? 0, n)));
+      }}
+      onBlur={() => {
+        const n = parseInt(raw, 10);
+        const clamped = isNaN(n) ? (min ?? 0) : Math.min(max ?? 9999, Math.max(min ?? 0, n));
+        onChange(clamped);
+        setRaw(String(clamped));
+      }}
+    />
+  );
+}
 function shiftColor(code: string, offShifts: ShiftDef[]) { return isOff(code, offShifts) ? "#dc2626" : "#111827"; }
 
 // ─── 班別 Modal
@@ -186,6 +215,7 @@ export default function AdminPage() {
   const isDual = user.role === "dual";
 
   const [tab, setTab] = useState<Tab>("schedule");
+  const [pendingTab, setPendingTab] = useState<Tab | null>(null);
   const [ym, setYm] = useState(dayjs().format("YYYY-MM"));
 
   // 全域資料
@@ -253,6 +283,10 @@ export default function AdminPage() {
   const shiftOffRefs  = useRef<(HTMLDivElement | null)[]>([]);
   const [userDragEnabled,  setUserDragEnabled]  = useState(false);
   const [shiftDragEnabled, setShiftDragEnabled] = useState(false);
+  // 帳號卡片本地編輯緩衝（uid → partial User）
+  const [userEdits, setUserEdits] = useState<Record<string, Partial<User>>>({});
+  const [userDirty, setUserDirty] = useState<Set<string>>(new Set());
+  const [userSaving, setUserSaving] = useState<Set<string>>(new Set());
 
   // 週期設定
   const [cycle, setCycle] = useState({
@@ -807,8 +841,9 @@ export default function AdminPage() {
     itemCount: number,
     onDrop: (from: number, to: number) => void,
   ) {
-    const el = itemRefs.current[fromIdx];
-    if (!el) return;
+    const elOrNull = itemRefs.current[fromIdx];
+    if (!elOrNull) return;
+    const el: HTMLDivElement = elOrNull;
     const rect = el.getBoundingClientRect();
     const itemH = rect.height || 60;
     let overIdx = fromIdx;
@@ -899,29 +934,6 @@ export default function AdminPage() {
     });
   }
 
-  // 行內快速修改單一欄位
-  async function patchUserField(uid: string, field: string, value: unknown) {
-    if (field === "attr") {
-      const oldUser = users.find(u => u.uid === uid);
-      const oldAttr = oldUser?.attr ?? "";
-      const newAttr = value as string;
-      if (oldAttr !== newAttr && isRotationAttr(oldAttr) && isRotationAttr(newAttr)) {
-        // 輪班→輪班：可能有個別覆蓋不相容
-        const hasOverride = ratioOverrides.some(o => o.nurse_uid === uid);
-        if (hasOverride) {
-          setAttrChangeWarn({ uid, oldAttr, newAttr });
-          return; // 先顯示警告，確認後才套用
-        }
-      }
-    }
-    try {
-      await api.patch(`/users/${uid}`, { [field]: value });
-      setUsers(prev => prev.map(u => u.uid === uid ? { ...u, [field]: value } : u));
-    } catch (err: any) {
-      showToast("✗ " + (err.response?.data?.detail ?? "更新失敗"), false);
-    }
-  }
-
   async function confirmAttrChange() {
     if (!attrChangeWarn) return;
     const { uid, newAttr } = attrChangeWarn;
@@ -931,6 +943,41 @@ export default function AdminPage() {
       setUsers(prev => prev.map(u => u.uid === uid ? { ...u, attr: newAttr } : u));
     } catch (err: any) {
       showToast("✗ " + (err.response?.data?.detail ?? "更新失敗"), false);
+    }
+  }
+
+  // 帳號卡片本地編輯 helpers
+  function getUserVal<K extends keyof User>(u: User, k: K): User[K] {
+    return (userEdits[u.uid]?.[k] ?? u[k]) as User[K];
+  }
+  function setUserEdit(uid: string, patch: Partial<User>) {
+    setUserEdits(prev => ({ ...prev, [uid]: { ...prev[uid], ...patch } }));
+    setUserDirty(prev => { const s = new Set(prev); s.add(uid); return s; });
+  }
+  async function saveUserCard(u: User) {
+    const edits = userEdits[u.uid];
+    if (!edits) return;
+    const uid = u.uid;
+    setUserSaving(prev => { const s = new Set(prev); s.add(uid); return s; });
+    try {
+      // handle attr change warning (same logic as patchUserField)
+      if (edits.attr && edits.attr !== u.attr && isRotationAttr(u.attr) && isRotationAttr(edits.attr)) {
+        const hasOverride = ratioOverrides.some(o => o.nurse_uid === uid);
+        if (hasOverride) {
+          setAttrChangeWarn({ uid, oldAttr: u.attr, newAttr: edits.attr });
+          setUserSaving(prev => { const s = new Set(prev); s.delete(uid); return s; });
+          return;
+        }
+      }
+      await api.patch(`/users/${uid}`, edits);
+      setUsers(prev => prev.map(x => x.uid === uid ? { ...x, ...edits } : x));
+      setUserEdits(prev => { const n = { ...prev }; delete n[uid]; return n; });
+      setUserDirty(prev => { const s = new Set(prev); s.delete(uid); return s; });
+      showToast("✓ 已儲存", true);
+    } catch (err: any) {
+      showToast("✗ " + (err.response?.data?.detail ?? "更新失敗"), false);
+    } finally {
+      setUserSaving(prev => { const s = new Set(prev); s.delete(uid); return s; });
     }
   }
 
@@ -1327,7 +1374,13 @@ export default function AdminPage() {
       {/* ── Tab bar */}
       <div className="ap-tabs">
         {TABS.map(t => (
-          <button key={t.key} className={`ap-tab${tab===t.key?" active":""}`} onClick={() => setTab(t.key)}>
+          <button key={t.key} className={`ap-tab${tab===t.key?" active":""}`} onClick={() => {
+              if (t.key !== "users" && tab === "users" && userDirty.size > 0) {
+                setPendingTab(t.key);
+              } else {
+                setTab(t.key);
+              }
+            }}>
             {t.label}
           </button>
         ))}
@@ -1343,10 +1396,10 @@ export default function AdminPage() {
             <div className="card-head">
               <div>
                 <div style={{ fontSize:16, fontWeight:700 }}>手動填寫班表</div>
-                <div style={{ fontSize:12, color:"#9ca3af", marginTop:2 }}>
+                <div style={{ marginTop:2 }}>
                   {cycleIsSet
-                    ? <>{cycleTitleLabel}　<span style={{ color:"#d1d5db" }}>灰色欄為上週參考，護理師不可見</span></>
-                    : "點格子選擇班別，填完後「確認送出」"}
+                    ? <><span className="ap-cycle-title" style={{ fontSize:18, color:"#000", fontWeight:600 }}>{cycleTitleLabel}</span>　<span style={{ fontSize:12, color:"#d1d5db" }}>灰色欄為上週參考，護理師不可見</span></>
+                    : <span style={{ fontSize:12, color:"#9ca3af" }}>點格子選擇班別，填完後「確認送出」</span>}
                 </div>
               </div>
               <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
@@ -1558,109 +1611,111 @@ export default function AdminPage() {
               <div>
                 {visibleUsers.map((u, i) => {
                   const canEditRole = isSuperAdmin || (u.role !== "superadmin" && u.uid !== user.uid);
-                  const roleBadgeStyle: React.CSSProperties = {
-                    display:"inline-block", padding:"2px 8px", borderRadius:5, fontSize:12, fontWeight:700,
-                    background: u.role==="nurse"?"#e0f2fe": u.role==="dual"?"#fef3c7": u.role==="admin"?"#f3f4f6":"#f3e8ff",
-                    color:      u.role==="nurse"?"#0369a1": u.role==="dual"?"#92400e": u.role==="admin"?"#374151":"#7e22ce",
-                  };
                   const selStyle: React.CSSProperties = { fontSize:12, border:"1px solid #e5e7eb", borderRadius:6, padding:"3px 6px", background:"#f9fafb", cursor:"pointer", fontFamily:"inherit" };
+                  const isDirty = userDirty.has(u.uid);
+                  const isSavingThis = userSaving.has(u.uid);
+                  const curAttr = getUserVal(u, "attr");
+                  const curLevel = getUserVal(u, "level");
+                  const curRole = getUserVal(u, "role");
+                  const curHalftime = getUserVal(u, "halftime");
+                  const curNote = getUserVal(u, "note");
                   return (
                     <div
                       key={u.uid}
                       ref={el => { userItemRefs.current[i] = el; }}
-                      style={{ borderBottom:"1px solid #f3f4f6", padding:"12px 16px" }}
+                      style={{ borderBottom:"1px solid #f3f4f6", padding:"12px 16px", background: isDirty ? "#fffbeb" : undefined }}
                     >
-                      {/* 行 1：把手 | 姓名 | 角色代稱 | 🔑 | 刪除 */}
-                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+                      {/* 行 1：☰ | 姓名 | uid | role-select | 🔑 | 🗑 */}
+                      <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6, flexWrap:"wrap" }}>
                         <span
                           className="drag-handle"
-                          style={{ color: userDragEnabled ? "#9ca3af" : "#e5e7eb", cursor: userDragEnabled ? "grab" : "default" }}
+                          style={{ color: userDragEnabled ? "#9ca3af" : "#e5e7eb", cursor: userDragEnabled ? "grab" : "default", flexShrink:0 }}
                           onTouchStart={userDragEnabled ? e => { e.preventDefault(); handleUserDragStart(e.touches[0].clientY, i); } : undefined}
                           onMouseDown={userDragEnabled ? e => { e.preventDefault(); handleUserDragStart(e.clientY, i); } : undefined}
                         >☰</span>
-                        <span style={{ fontWeight:700, fontSize:14 }}>{u.name}</span>
-                        <code style={{ fontSize:11, background:"#f3f4f6", padding:"1px 6px", borderRadius:4, color:"#6b7280" }}>{u.uid}</code>
+                        <span style={{ fontWeight:700, fontSize:14, flexShrink:0 }}>{u.name}</span>
+                        <code style={{ fontSize:11, background:"#f3f4f6", padding:"1px 6px", borderRadius:4, color:"#6b7280", flexShrink:0 }}>{u.uid}</code>
                         {canEditRole ? (
-                          <select value={u.role} onChange={e => patchUserField(u.uid,"role",e.target.value)} style={{ ...selStyle, fontSize:12, padding:"2px 4px" }}>
+                          <select value={curRole} onChange={e => setUserEdit(u.uid,{role:e.target.value})} style={{ ...selStyle, fontSize:12, padding:"2px 4px", width:110 }}>
                             <option value="nurse">護理師</option>
                             <option value="dual">管理員兼護理師</option>
                             <option value="admin">管理員</option>
                             {isSuperAdmin && <option value="superadmin">超級管理員</option>}
                           </select>
                         ) : (
-                          <span style={roleBadgeStyle}>{ROLE_ABBR[u.role] ?? u.role}</span>
+                          <span style={{ display:"inline-block", padding:"2px 8px", borderRadius:5, fontSize:12, fontWeight:700,
+                            background: u.role==="nurse"?"#e0f2fe": u.role==="dual"?"#fef3c7": u.role==="admin"?"#f3f4f6":"#f3e8ff",
+                            color:      u.role==="nurse"?"#0369a1": u.role==="dual"?"#92400e": u.role==="admin"?"#374151":"#7e22ce" }}>
+                            {ROLE_ABBR[u.role] ?? u.role}
+                          </span>
                         )}
-                        <div style={{ marginLeft:"auto", display:"flex", gap:6 }}>
-                          <button
-                            className="btn btn-outline btn-sm"
-                            title="重設密碼"
-                            onClick={() => { setEditUser(u); setEditForm({ name:u.name, role:u.role, level:u.level, attr:u.attr, halftime:u.halftime, note:u.note, showEditPwd:true }); }}>
-                            🔑
+                        <button
+                          className="btn btn-outline btn-sm"
+                          style={{ marginLeft:"auto", flexShrink:0 }}
+                          title="重設密碼"
+                          onClick={() => { setEditUser(u); setEditForm({ name:u.name, role:u.role, level:u.level, attr:u.attr, halftime:u.halftime, note:u.note, showEditPwd:true }); }}>
+                          🔑
+                        </button>
+                        {u.uid !== user.uid && (
+                          <button className="btn btn-sm" style={{ background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca", flexShrink:0 }} onClick={() => setDeleteTarget(u)}>
+                            🗑
                           </button>
-                          {u.uid !== user.uid && (
-                            <button className="btn btn-sm" style={{ background:"#fef2f2", color:"#dc2626", border:"1px solid #fecaca" }} onClick={() => setDeleteTarget(u)}>
-                              刪除
-                            </button>
-                          )}
-                        </div>
+                        )}
                       </div>
-                      {/* 行 2：層級 | 輪班屬性 | 半職 */}
-                      <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap", marginBottom:8 }}>
-                        <label style={{ fontSize:12, color:"#6b7280", display:"flex", alignItems:"center", gap:4 }}>
-                          <span>層級</span>
-                          <select value={u.level} onChange={e => patchUserField(u.uid,"level",e.target.value)} style={selStyle}>
-                            <option value="leader">leader</option>
-                            <option value="second">second</option>
-                            <option value="member">member</option>
-                          </select>
-                        </label>
-                        <label style={{ fontSize:12, color:"#6b7280", display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" }}>
-                          <span>輪班</span>
-                          <select value={u.attr} onChange={e => patchUserField(u.uid,"attr",e.target.value)} style={selStyle}>
-                            <option value="固定D">固定D</option>
-                            <option value="固定E">固定E</option>
-                            <option value="固定N">固定N</option>
-                            <option value="輪班DE">輪班DE</option>
-                            <option value="輪班EN">輪班EN</option>
-                            <option value="輪班DN">輪班DN</option>
-                            <option value="輪班DEN">輪班DEN</option>
-                          </select>
-                          {(() => {
-                            if (!isRotationAttr(u.attr)) return null;
-                            const ov = ratioOverrides.find(o => o.nurse_uid === u.uid);
-                            const ratio = ov ? ov.ratio : (() => {
-                              if (u.attr==="輪班DE") return { D:ratioForm.de_d, E:ratioForm.de_e };
-                              if (u.attr==="輪班EN") return { E:ratioForm.en_e, N:ratioForm.en_n };
-                              if (u.attr==="輪班DN") return { D:ratioForm.dn_d, N:ratioForm.dn_n };
-                              if (u.attr==="輪班DEN") return { D:ratioForm.den_d, E:ratioForm.den_e, N:ratioForm.den_n };
-                              return null;
-                            })();
-                            if (!ratio) return null;
-                            const lbl = Object.entries(ratio).map(([k,v])=>`${k}:${v}`).join(" / ");
-                            return (
-                              <span style={{
-                                fontSize:11, color: ov ? "#1d4ed8" : "#6b7280",
-                                background: ov ? "#eff6ff" : "#f3f4f6",
-                                border: `1px solid ${ov ? "#bfdbfe" : "#e5e7eb"}`,
-                                borderRadius:5, padding:"1px 6px", whiteSpace:"nowrap",
-                              }} title={ov ? "個別覆蓋比例" : "全域預設比例"}>
-                                比例 {lbl}{ov ? "" : "（全域）"}
-                              </span>
-                            );
-                          })()}
-                        </label>
-                        <label style={{ fontSize:12, color:"#6b7280", display:"flex", alignItems:"center", gap:4, cursor:"pointer" }}>
-                          <input type="checkbox" checked={u.halftime} onChange={e => patchUserField(u.uid,"halftime",e.target.checked)} style={{ width:14, height:14 }} />
+                      {/* 行 2：level | attr | ☐ 半職 */}
+                      <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:6 }}>
+                        <select value={curLevel} onChange={e => setUserEdit(u.uid,{level:e.target.value})} style={selStyle}>
+                          <option value="leader">leader</option>
+                          <option value="second">second</option>
+                          <option value="member">member</option>
+                        </select>
+                        <select value={curAttr} onChange={e => setUserEdit(u.uid,{attr:e.target.value})} style={selStyle}>
+                          <option value="固定D">固定D</option>
+                          <option value="固定E">固定E</option>
+                          <option value="固定N">固定N</option>
+                          <option value="輪班DE">輪班DE</option>
+                          <option value="輪班EN">輪班EN</option>
+                          <option value="輪班DN">輪班DN</option>
+                          <option value="輪班DEN">輪班DEN</option>
+                        </select>
+                        {(() => {
+                          if (!isRotationAttr(curAttr)) return null;
+                          const ov = ratioOverrides.find(o => o.nurse_uid === u.uid);
+                          const ratio = ov ? ov.ratio : (() => {
+                            if (curAttr==="輪班DE") return { D:ratioForm.de_d, E:ratioForm.de_e };
+                            if (curAttr==="輪班EN") return { E:ratioForm.en_e, N:ratioForm.en_n };
+                            if (curAttr==="輪班DN") return { D:ratioForm.dn_d, N:ratioForm.dn_n };
+                            if (curAttr==="輪班DEN") return { D:ratioForm.den_d, E:ratioForm.den_e, N:ratioForm.den_n };
+                            return null;
+                          })();
+                          if (!ratio) return null;
+                          const lbl = Object.entries(ratio).map(([k,v])=>`${k}:${v}`).join(" / ");
+                          return (
+                            <span style={{ fontSize:11, color: ov?"#1d4ed8":"#6b7280", background: ov?"#eff6ff":"#f3f4f6", border:`1px solid ${ov?"#bfdbfe":"#e5e7eb"}`, borderRadius:5, padding:"1px 6px", whiteSpace:"nowrap" }} title={ov?"個別覆蓋比例":"全域預設比例"}>
+                              比例 {lbl}{ov?"":" （全域）"}
+                            </span>
+                          );
+                        })()}
+                        <label style={{ fontSize:12, color:"#374151", display:"flex", alignItems:"center", gap:4, cursor:"pointer" }}>
+                          <input type="checkbox" checked={curHalftime} onChange={e => setUserEdit(u.uid,{halftime:e.target.checked})} style={{ width:14, height:14 }} />
                           <span>半職</span>
                         </label>
                       </div>
-                      {/* 行 3：備註（整行） */}
+                      {/* 行 3：備註 */}
                       <input
-                        defaultValue={u.note}
+                        value={curNote}
                         placeholder="備註（選填）"
-                        onBlur={e => { if (e.target.value !== u.note) patchUserField(u.uid,"note",e.target.value); }}
+                        onChange={e => setUserEdit(u.uid,{note:e.target.value})}
                         onKeyDown={e => { if (e.key==="Enter") (e.target as HTMLInputElement).blur(); }}
-                        style={{ width:"100%", boxSizing:"border-box", fontSize:12, border:"1px solid #e5e7eb", borderRadius:6, padding:"5px 10px", background:"#f9fafb", fontFamily:"inherit" }} />
+                        style={{ width:"100%", boxSizing:"border-box", fontSize:12, border:"1px solid #e5e7eb", borderRadius:6, padding:"5px 10px", background:"#f9fafb", fontFamily:"inherit", marginBottom:6 }} />
+                      {/* 儲存 */}
+                      <button
+                        className="btn"
+                        style={{ background:"#16a34a", color:"#fff", border:"none", fontSize:13, padding:"5px 18px", borderRadius:7, opacity: isDirty?1:0.35, cursor: isDirty?"pointer":"default" }}
+                        disabled={!isDirty || isSavingThis}
+                        onClick={() => saveUserCard(u)}>
+                        {isSavingThis ? "儲存中…" : "儲存"}
+                      </button>
                     </div>
                   );
                 })}
@@ -1795,9 +1850,9 @@ export default function AdminPage() {
                       {/* 週期長度 */}
                       <div>
                         <label className="flabel">週期長度（天）</label>
-                        <input className="finput" type="number" min={1} max={365}
+                        <NumInput className="finput" min={1} max={365}
                           value={cycle.period_days}
-                          onChange={e => handlePeriodDays(parseInt(e.target.value) || 1)} />
+                          onChange={n => handlePeriodDays(n)} />
                         {cycle.period_days > 0 && (
                           <div style={{ fontSize:12, color:"#6b7280", marginTop:5 }}>
                             約 {(cycle.period_days / 7).toFixed(1)} 週
@@ -1848,8 +1903,8 @@ export default function AdminPage() {
                     <div className="setting-title">🗓 國定假日天數</div>
                     <div style={{ maxWidth:280 }}>
                       <label className="flabel">本週期國定假日天數（0 ～ 5 天）</label>
-                      <input className="finput" type="number" min={0} max={5} value={cycle.holiday_days}
-                        onChange={e => setCycle(p=>({...p,holiday_days:Math.min(5,Math.max(0,+e.target.value))}))} />
+                      <NumInput className="finput" min={0} max={5} value={cycle.holiday_days}
+                        onChange={n => setCycle(p=>({...p,holiday_days:n}))} />
                     </div>
                     <div style={{ marginTop:12, display:"flex", gap:14, flexWrap:"wrap" }}>
                       <div style={{ padding:"12px 16px", background:"#dcfce7", borderRadius:10, border:"1px solid #bbf7d0", minWidth:175 }}>
@@ -1903,8 +1958,8 @@ export default function AdminPage() {
                     <div className="setting-title">🌴 休假天數上限</div>
                     <div style={{ maxWidth:280 }}>
                       <label className="flabel">每人可申請休假天數上限（天）</label>
-                      <input className="finput" type="number" min={0} max={31} value={rulesForm.max_off_days}
-                        onChange={e => setRulesForm(p=>({...p,max_off_days:+e.target.value}))} />
+                      <NumInput className="finput" min={0} max={31} value={rulesForm.max_off_days}
+                        onChange={n => setRulesForm(p=>({...p,max_off_days:n}))} />
                     </div>
                   </div>
 
@@ -1914,9 +1969,9 @@ export default function AdminPage() {
                       {([["D","daily_d","白班"],["E","daily_e","小夜"],["N","daily_n","大夜"]] as const).map(([c,k,lbl]) => (
                         <div key={k}>
                           <label className="flabel">{c} {lbl}（人）</label>
-                          <input className="finput" type="number" min={1} max={20}
+                          <NumInput className="finput" min={1} max={20}
                             value={(rulesForm as any)[k]}
-                            onChange={e => setRulesForm(p=>({...p,[k]:+e.target.value}))} />
+                            onChange={n => setRulesForm(p=>({...p,[k]:n}))} />
                         </div>
                       ))}
                     </div>
@@ -1933,8 +1988,8 @@ export default function AdminPage() {
                         {(["d","e","n"] as const).map(f => (
                           <div key={f} style={{ display:"flex", alignItems:"center", gap:4 }}>
                             <span style={{ fontSize:12, fontWeight:600 }}>{f.toUpperCase()}:</span>
-                            <input type="number" min={0} max={20} value={(sd as any)[f]}
-                              onChange={e => setRulesForm(p=>({...p,special_dates:p.special_dates.map((x,j)=>j===i?{...x,[f]:+e.target.value}:x)}))}
+                            <NumInput min={0} max={20} value={(sd as any)[f]}
+                              onChange={n => setRulesForm(p=>({...p,special_dates:p.special_dates.map((x,j)=>j===i?{...x,[f]:n}:x)}))}
                               style={{ width:50, border:"1px solid #e5e7eb", borderRadius:6, padding:"4px 6px", fontFamily:"inherit", fontSize:13 }} />
                           </div>
                         ))}
@@ -1952,8 +2007,8 @@ export default function AdminPage() {
                     <div className="setting-title">📊 連班限制</div>
                     <div style={{ maxWidth:280, marginBottom:14 }}>
                       <label className="flabel">連續上班天數上限（天，跨週累計不歸零）</label>
-                      <input className="finput" type="number" min={1} max={14} value={rulesForm.max_consecutive_work}
-                        onChange={e => setRulesForm(p=>({...p,max_consecutive_work:+e.target.value}))} />
+                      <NumInput className="finput" min={1} max={14} value={rulesForm.max_consecutive_work}
+                        onChange={n => setRulesForm(p=>({...p,max_consecutive_work:n}))} />
                     </div>
                     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                       <label className="fcheck">
@@ -2024,12 +2079,12 @@ export default function AdminPage() {
                       <div key={cfg.key}>
                         <label className="flabel">{cfg.label}（{cfg.desc}）</label>
                         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                          <input type="number" min={1} max={99} value={(ratioForm as any)[cfg.d]}
-                            onChange={e => setRatioForm(p=>({...p,[cfg.d]:+e.target.value}))}
+                          <NumInput min={1} max={99} value={(ratioForm as any)[cfg.d]}
+                            onChange={n => setRatioForm(p=>({...p,[cfg.d]:n}))}
                             style={{ width:54, border:"1px solid #e5e7eb", borderRadius:7, padding:"5px 8px", fontFamily:"inherit", fontSize:13 }} />
                           <span style={{ color:"#9ca3af" }}>：</span>
-                          <input type="number" min={1} max={99} value={(ratioForm as any)[cfg.e]}
-                            onChange={e => setRatioForm(p=>({...p,[cfg.e]:+e.target.value}))}
+                          <NumInput min={1} max={99} value={(ratioForm as any)[cfg.e]}
+                            onChange={n => setRatioForm(p=>({...p,[cfg.e]:n}))}
                             style={{ width:54, border:"1px solid #e5e7eb", borderRadius:7, padding:"5px 8px", fontFamily:"inherit", fontSize:13 }} />
                         </div>
                       </div>
@@ -2039,8 +2094,8 @@ export default function AdminPage() {
                       <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                         {(["den_d","den_e","den_n"] as const).map((k,i) => (<>
                           {i > 0 && <span key={`sep${i}`} style={{ color:"#9ca3af" }}>：</span>}
-                          <input key={k} type="number" min={1} max={99} value={ratioForm[k]}
-                            onChange={e => setRatioForm(p=>({...p,[k]:+e.target.value}))}
+                          <NumInput key={k} min={1} max={99} value={ratioForm[k]}
+                            onChange={n => setRatioForm(p=>({...p,[k]:n}))}
                             style={{ width:54, border:"1px solid #e5e7eb", borderRadius:7, padding:"5px 8px", fontFamily:"inherit", fontSize:13 }} />
                         </>))}
                       </div>
@@ -2101,10 +2156,10 @@ export default function AdminPage() {
                                 <span key={k} style={{ display:"flex", alignItems:"center", gap:4 }}>
                                   {ki > 0 && <span style={{ color:"#9ca3af" }}>：</span>}
                                   <span style={{ fontSize:12, fontWeight:600 }}>{k}</span>
-                                  <input type="number" min={1} max={99}
+                                  <NumInput min={1} max={99}
                                     value={ov.ratio[k] ?? 1}
-                                    onChange={e => setRatioOverrides(prev => prev.map((o, i) => i === idx
-                                      ? { ...o, ratio: { ...o.ratio, [k]: Math.max(1, +e.target.value || 1) } }
+                                    onChange={n => setRatioOverrides(prev => prev.map((o, i) => i === idx
+                                      ? { ...o, ratio: { ...o.ratio, [k]: n } }
                                       : o))}
                                     style={inputStyle} />
                                 </span>
@@ -2567,6 +2622,29 @@ export default function AdminPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── 未儲存離開提示 Dialog */}
+      {pendingTab && (
+        <Dialog
+          title="帳號管理有未儲存的變更"
+          body={`有 ${userDirty.size} 筆帳號有未儲存的變更，確定要離開嗎？`}
+          actions={[
+            { label: "取消", onClick: () => setPendingTab(null) },
+            { label: "直接離開", danger: true, onClick: () => {
+              setUserEdits({});
+              setUserDirty(new Set());
+              setTab(pendingTab!);
+              setPendingTab(null);
+            }},
+            { label: "儲存後離開", primary: true, onClick: async () => {
+              const dirtyUsers = users.filter(u => userDirty.has(u.uid));
+              for (const u of dirtyUsers) await saveUserCard(u);
+              setTab(pendingTab!);
+              setPendingTab(null);
+            }},
+          ]}
+        />
       )}
 
       {/* ── 刪除帳號確認 Dialog */}

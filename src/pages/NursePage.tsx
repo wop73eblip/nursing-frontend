@@ -14,11 +14,12 @@ function shiftColor(s: string, offShifts: string[]) { return isOffFn(s, offShift
 function attrMismatchMsg(shift: string, attr: string, offCodes: string[]): string | null {
   if (!shift || !attr) return null;
   const ok = [...offCodes, "公","會","書記"];
-  if (attr.includes("白班") && shift !== "D" && !ok.includes(shift))
+  if (ok.includes(shift)) return null;
+  if ((attr === "固定D" || attr === "白班") && shift !== "D")
     return `選取的班別與輪班屬性「${attr}」不符`;
-  if (attr.includes("小夜") && shift !== "E" && !ok.includes(shift))
+  if ((attr === "固定E" || attr === "小夜") && shift !== "E")
     return `選取的班別與輪班屬性「${attr}」不符`;
-  if (attr.includes("大夜") && shift !== "N" && !ok.includes(shift))
+  if ((attr === "固定N" || attr === "大夜") && shift !== "N")
     return `選取的班別與輪班屬性「${attr}」不符`;
   return null;
 }
@@ -244,6 +245,9 @@ export default function NursePage() {
   const scrollSpeedRef = useRef<number>(10);
   const autoScrollFrameRef = useRef<number | null>(null);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
+
+  // 頁籤
+  const [npTab, setNpTab] = useState<"schedule"|"settings">("schedule");
 
   // 個人設定
   const [attr, setAttr] = useState("");
@@ -732,6 +736,14 @@ export default function NursePage() {
         .smsg-ok  { color: #16a34a; font-size: 13px; margin-top: 8px; }
         .smsg-err { color: #dc2626; font-size: 13px; margin-top: 8px; }
 
+        /* 頁籤 */
+        .np-tabs { display: flex; gap: 2px; padding: 10px 16px 0; background: #fff; }
+        .np-tab {
+          padding: 8px 18px; border-radius: 8px 8px 0 0; font-size: 14px; font-weight: 600;
+          border: none; background: #f3f4f6; color: #6b7280; cursor: pointer; font-family: inherit; transition: background .12s;
+        }
+        .np-tab.active { background: #2563eb; color: #fff; }
+
         /* Toast */
         .toast {
           position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
@@ -780,14 +792,20 @@ export default function NursePage() {
         </div>
       </nav>
 
+      {/* ── 頁籤列 */}
+      <div className="np-tabs">
+        <button className={`np-tab${npTab==="schedule"?" active":""}`} onClick={() => setNpTab("schedule")}>本期預班</button>
+        <button className={`np-tab${npTab==="settings"?" active":""}`} onClick={() => setNpTab("settings")}>個人設定</button>
+      </div>
+
       <div className="np-body">
 
         {/* ── 預班表格 */}
-        <div className="xcard">
+        {npTab === "schedule" && <div className="xcard">
           <div className="month-bar">
             <div>
               <div style={{ fontSize: 15, fontWeight: 700 }}>本期預班表</div>
-              <div style={{ fontSize: 13, color: "#374151", fontWeight: 600, marginTop: 2 }}>{cycleTitleLabel}</div>
+              <div style={{ fontSize: 18, color: "#000", fontWeight: 600, marginTop: 2 }} className="np-cycle-title">{cycleTitleLabel}</div>
               <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
                 藍色列為您的班表，點格子可填寫；其他同事為唯讀
               </div>
@@ -965,19 +983,24 @@ export default function NursePage() {
               填寫完成後請按「確認送出」通知管理員
             </span>
           </div>
-        </div>
+        </div>}
 
         {/* ── 個人設定 */}
-        <div className="xcard">
-          <div style={{ padding: "14px 16px 0" }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>個人設定</div>
-          </div>
-
+        {npTab === "settings" && <div className="xcard">
           <div className="sblock">
             <div className="sblock-title">基本資料</div>
             <div className="xfield">
               <label>輪班屬性</label>
-              <input value={attr} onChange={e => setAttr(e.target.value)} placeholder="如：輪班、固定白班…" />
+              <select value={attr} onChange={e => setAttr(e.target.value)}
+                style={{ width:"100%", padding:"9px 12px", border:"1.5px solid #d1d5db", borderRadius:8, fontSize:14, fontFamily:"inherit", color:"#111827", background:"#fff", outline:"none" }}>
+                <option value="固定D">固定D</option>
+                <option value="固定E">固定E</option>
+                <option value="固定N">固定N</option>
+                <option value="輪班DE">輪班DE</option>
+                <option value="輪班EN">輪班EN</option>
+                <option value="輪班DN">輪班DN</option>
+                <option value="輪班DEN">輪班DEN</option>
+              </select>
             </div>
             <div className="xfield">
               <label>備註</label>
@@ -1015,7 +1038,7 @@ export default function NursePage() {
             >變更密碼</button>
             {sMsg.text && <div className={sMsg.ok ? "smsg-ok" : "smsg-err"}>{sMsg.text}</div>}
           </div>
-        </div>
+        </div>}
 
       </div>
 

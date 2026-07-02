@@ -170,7 +170,7 @@ function SwipeRangePopup({
         <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
           <button onClick={() => onSelect(null)} style={{
             width: "100%", padding: "6px", background: "none", border: "none",
-            color: "#9ca3af", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+            color: "#dc2626", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
           }}>✕ 清除選取日期的班別</button>
         </div>
       </div>

@@ -150,7 +150,7 @@ function ShiftPopup({
                 <div style={{ borderTop: "1px solid #f3f4f6", margin: "10px 0 6px" }} />
                 <button onClick={() => onSelect(null)} style={{
                   width: "100%", padding: "6px", background: "none", border: "none",
-                  color: "#9ca3af", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+                  color: "#dc2626", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
                 }}>✕ 清除班別</button>
               </>
             )}
@@ -298,7 +298,8 @@ export default function NursePage() {
     }).length;
   }
 
-  useEffect(() => { loadAll(); }, [ym]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadAll(); }, []);
   useEffect(() => { daysRef.current = days; }, [days]);
   useEffect(() => { ctrlSelectedRef.current = ctrlSelected; }, [ctrlSelected]);
   useEffect(() => { shiftRangeRef.current = shiftRange; }, [shiftRange]);
@@ -364,7 +365,7 @@ export default function NursePage() {
         sched[r.nurse_uid][r.date] = { shift: r.shift, confirmed: !!r.confirmed };
       }
       setAllSched(sched);
-    } catch {}
+    } catch (e) { console.error("[loadAll]", e); }
   }
 
   function showToast(msg: string) {
@@ -1059,7 +1060,7 @@ export default function NursePage() {
             <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
               <button onClick={() => batchSwipeSave(batchPopup.dates, null).then(() => { setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set()); })} style={{
                 width: "100%", padding: "6px", background: "none", border: "none",
-                color: "#9ca3af", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+                color: "#dc2626", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
               }}>✕ 清除選取日期的班別</button>
             </div>
           </div>
@@ -1108,7 +1109,7 @@ export default function NursePage() {
             <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
               <button onClick={() => batchSwipeSave(swipePopup.dates, null)} style={{
                 width: "100%", padding: "6px", background: "none", border: "none",
-                color: "#9ca3af", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
+                color: "#dc2626", fontSize: 12, cursor: "pointer", fontFamily: "inherit",
               }}>✕ 清除選取日期的班別</button>
             </div>
           </div>

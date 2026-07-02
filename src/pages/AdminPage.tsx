@@ -2390,39 +2390,56 @@ export default function AdminPage() {
                 </select>
               </div>
             </div>
-            <div style={{ overflowX:"auto" }}>
-              <table className="tbl">
+            <div style={{ overflowX:"hidden", overflowY:"auto", maxHeight:"65vh" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", tableLayout:"fixed" }}>
+                <colgroup>
+                  <col style={{ width:"13%" }} />
+                  <col style={{ width:"14%" }} />
+                  <col style={{ width:"8%" }} />
+                  <col style={{ width:"14%" }} />
+                  <col style={{ width:"14%" }} />
+                  <col style={{ width:"13%" }} />
+                  <col style={{ width:"10%" }} />
+                </colgroup>
                 <thead>
-                  <tr>
+                  <tr style={{ position:"sticky", top:0, zIndex:10, background:"#f8fafc" }}>
                     {["時間","操作者","角色","動作","護理師","日期","班別"].map(h => (
-                      <th key={h}>{h}</th>
+                      <th key={h} style={{ padding:"8px 6px", fontSize:12, fontWeight:700, color:"#6b7280", textAlign:"left", borderBottom:"2px solid #e5e7eb", background:"#f8fafc" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {logs.map((log, i) => (
-                    <tr key={i}>
-                      <td style={{ fontSize:12, color:"#9ca3af", whiteSpace:"nowrap" }}>{dayjs(log.created_at).format("MM/DD HH:mm")}</td>
-                      <td><code style={{ fontSize:12 }}>{log.operator_uid}</code></td>
-                      <td>
-                        <span className={`badge badge-${log.operator_role==="nurse"?"nurse":log.operator_role==="dual"?"dual":log.operator_role==="admin"?"admin":"super"}`}>
-                          {ROLE_LABELS[log.operator_role] ?? log.operator_role}
-                        </span>
-                      </td>
-                      <td style={{ fontSize:12 }}>
-                        {log.action==="confirm" ? <span style={{ color:"#16a34a", fontWeight:700 }}>✓ 確認</span>
-                          : log.action==="unconfirm" ? <span style={{ color:"#f59e0b", fontWeight:700 }}>↩ 取消確認</span>
-                          : <span style={{ color:"#6b7280" }}>編輯</span>}
-                      </td>
-                      <td><code style={{ fontSize:12 }}>{log.nurse_uid}</code></td>
-                      <td style={{ whiteSpace:"nowrap", fontSize:12 }}>{log.date}</td>
-                      <td>
-                        {log.shift
-                          ? <span style={{ fontWeight:700, color: isOff(log.shift, offShifts)?"#dc2626":"#111827" }}>{log.shift}</span>
-                          : <span style={{ color:"#d1d5db" }}>─</span>}
-                      </td>
-                    </tr>
-                  ))}
+                  {logs.map((log, i) => {
+                    const operatorName = users.find(u => u.uid === log.operator_uid)?.name ?? log.operator_uid;
+                    const nurseName    = users.find(u => u.uid === log.nurse_uid)?.name ?? log.nurse_uid;
+                    const roleShort: Record<string,string> = { nurse:"護", dual:"兼", admin:"管", superadmin:"超" };
+                    const logDate = log.date ? dayjs(log.date).format("MM/DD") : "";
+                    return (
+                      <tr key={i} style={{ borderBottom:"1px solid #f3f4f6" }}>
+                        <td style={{ padding:"7px 6px", fontSize:12, color:"#9ca3af", wordBreak:"break-word" }}>
+                          {dayjs(log.created_at).format("MM/DD")}<br />{dayjs(log.created_at).format("HH:mm")}
+                        </td>
+                        <td style={{ padding:"7px 6px", fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{operatorName}</td>
+                        <td style={{ padding:"7px 6px" }}>
+                          <span className={`badge badge-${log.operator_role==="nurse"?"nurse":log.operator_role==="dual"?"dual":log.operator_role==="admin"?"admin":"super"}`}>
+                            {roleShort[log.operator_role] ?? log.operator_role}
+                          </span>
+                        </td>
+                        <td style={{ padding:"7px 6px", fontSize:12 }}>
+                          {log.action==="confirm" ? <span style={{ color:"#16a34a", fontWeight:700 }}>✓ 確認</span>
+                            : log.action==="unconfirm" ? <span style={{ color:"#f59e0b", fontWeight:700 }}>↩ 取消確認</span>
+                            : <span style={{ color:"#6b7280" }}>編輯</span>}
+                        </td>
+                        <td style={{ padding:"7px 6px", fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{nurseName}</td>
+                        <td style={{ padding:"7px 6px", fontSize:12, color:"#374151" }}>{logDate}</td>
+                        <td style={{ padding:"7px 6px" }}>
+                          {log.shift
+                            ? <span style={{ fontWeight:700, color: isOff(log.shift, offShifts)?"#dc2626":"#111827" }}>{log.shift}</span>
+                            : <span style={{ color:"#d1d5db" }}>─</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {!logs.length && (
                     <tr><td colSpan={7} style={{ textAlign:"center", padding:40, color:"#9ca3af" }}>尚無操作紀錄</td></tr>
                   )}

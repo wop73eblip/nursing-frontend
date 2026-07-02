@@ -1657,17 +1657,31 @@ export default function AdminPage() {
                       ref={el => { userItemRefs.current[i] = el; }}
                       style={{
                         borderBottom: "1px solid #f3f4f6",
-                        padding: "10px 14px",
+                        padding: "10px 14px 10px 32px",
                         background: isDirty ? "#fffbeb" : undefined,
+                        position: "relative",
                       }}
                     >
+                      {/* ☰ 絕對定位在卡片左側中央 */}
+                      <span
+                        className="drag-handle"
+                        style={{
+                          position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)",
+                          color: userDragEnabled ? "#9ca3af" : "#e5e7eb",
+                          cursor: userDragEnabled ? "grab" : "default",
+                          fontSize: 16, userSelect: "none", lineHeight: 1,
+                        }}
+                        onTouchStart={userDragEnabled ? e => { e.preventDefault(); handleUserDragStart(e.touches[0].clientY, i); } : undefined}
+                        onMouseDown={userDragEnabled ? e => { e.preventDefault(); handleUserDragStart(e.clientY, i); } : undefined}
+                      >☰</span>
+
                       {/* ── 行 1：姓名 帳號 角色 🔑 🗑 */}
                       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
                         <span style={{ fontWeight:600, fontSize:14, flexShrink:0 }}>{u.name}</span>
                         <code style={{ fontSize:11, background:"#f3f4f6", padding:"1px 5px", borderRadius:4, color:"#9ca3af", flexShrink:0 }}>{u.uid}</code>
                         {canEditRole ? (
                           <select value={curRole} onChange={e => setUserEdit(u.uid, { role: e.target.value })}
-                            style={{ ...sel, width: 130 }}>
+                            style={{ ...sel, width: 120 }}>
                             <option value="nurse">護理師</option>
                             <option value="dual">管理員兼護理師</option>
                             <option value="admin">管理員</option>
@@ -1689,16 +1703,8 @@ export default function AdminPage() {
                         )}
                       </div>
 
-                      {/* ── 行 2：☰ 層級 輪班 比例 ☐半職 */}
+                      {/* ── 行 2：層級 輪班 比例 ☐半職 */}
                       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-                        {/* 拖曳把手 — 行 2 最左 */}
-                        <span
-                          className="drag-handle"
-                          style={{ color: userDragEnabled ? "#9ca3af" : "#e5e7eb", cursor: userDragEnabled ? "grab" : "default", flexShrink:0, fontSize:16, userSelect:"none" }}
-                          onTouchStart={userDragEnabled ? e => { e.preventDefault(); handleUserDragStart(e.touches[0].clientY, i); } : undefined}
-                          onMouseDown={userDragEnabled ? e => { e.preventDefault(); handleUserDragStart(e.clientY, i); } : undefined}
-                        >☰</span>
-
                         <select value={curLevel} onChange={e => setUserEdit(u.uid, { level: e.target.value })}
                           style={{ ...sel, width: 80 }}>
                           <option value="leader">leader</option>

@@ -24,7 +24,6 @@ const DEFAULT_OFF: ShiftDef[] = [
   { code: "調移", label: "調移", type: "off", admin_only: true },
 ];
 const DOW_ZH = ["日","一","二","三","四","五","六"];
-const ROLE_LABELS: Record<string,string> = { nurse:"護理師", dual:"管理員兼護理師", admin:"管理員", superadmin:"超級管理員" };
 const ROLE_ABBR:   Record<string,string> = { nurse:"護", dual:"兼", admin:"管", superadmin:"超" };
 
 // ─── Types

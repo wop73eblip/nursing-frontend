@@ -1130,10 +1130,10 @@ export default function AdminPage() {
   ];
 
   return (
-    <>
+    <div className="ap-root">
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { background: #f1f5f9 !important; color-scheme: light !important; }
+        html, body { background: #f1f5f9 !important; color-scheme: light !important; overflow-x: hidden; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft JhengHei", sans-serif; color: #111827; font-size: 14px; }
 
         /* Navbar */
@@ -1164,10 +1164,11 @@ export default function AdminPage() {
         .ap-tab:hover:not(.active) { color: #374151; background: #f8fafc; }
 
         /* Layout */
-        .ap-body { max-width: 1400px; margin: 0 auto; padding: 20px 16px 80px; }
-        .card { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; }
+        .ap-root { overflow-x: hidden; max-width: 100vw; box-sizing: border-box; }
+        .ap-body { max-width: 1400px; margin: 0 auto; padding: 20px 16px 80px; box-sizing: border-box; width: 100%; }
+        .card { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; box-sizing: border-box; width: 100%; }
         .card-head { padding: 16px 20px 12px; border-bottom: 1px solid #f3f4f6; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-        .card-body { padding: 20px; }
+        .card-body { padding: 20px; box-sizing: border-box; }
 
         /* Buttons */
         .btn { border: none; border-radius: 8px; font-family: inherit; cursor: pointer; font-size: 13px; font-weight: 600; padding: 8px 16px; transition: opacity .15s, background .15s; white-space: nowrap; }
@@ -1192,10 +1193,11 @@ export default function AdminPage() {
         .frow3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
         .flabel { display: block; font-size: 12px; font-weight: 600; color: #6b7280; margin-bottom: 5px; }
         .finput {
-          width: 100%; padding: 9px 12px;
+          width: 100%; max-width: 100%; padding: 9px 12px;
           border: 1.5px solid #d1d5db; border-radius: 8px;
           font-size: 14px; font-family: inherit; color: #111827;
           background: #fff; outline: none; color-scheme: light; -webkit-appearance: none;
+          box-sizing: border-box;
         }
         .finput:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
         .finput-sm { padding: 6px 9px; font-size: 13px; }
@@ -2389,21 +2391,21 @@ export default function AdminPage() {
                 </select>
               </div>
             </div>
-            <div style={{ overflowX:"hidden", overflowY:"auto", maxHeight:"65vh" }}>
-              <table style={{ width:"100%", borderCollapse:"collapse", tableLayout:"fixed" }}>
+            <div style={{ overflowX:"auto", overflowY:"auto", maxHeight:"65vh" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", tableLayout:"fixed", minWidth:320 }}>
                 <colgroup>
-                  <col style={{ width:"13%" }} />
+                  <col style={{ width:"15%" }} />
+                  <col style={{ width:"16%" }} />
+                  <col style={{ width:"9%" }} />
+                  <col style={{ width:"16%" }} />
+                  <col style={{ width:"16%" }} />
                   <col style={{ width:"14%" }} />
-                  <col style={{ width:"8%" }} />
                   <col style={{ width:"14%" }} />
-                  <col style={{ width:"14%" }} />
-                  <col style={{ width:"13%" }} />
-                  <col style={{ width:"10%" }} />
                 </colgroup>
                 <thead>
                   <tr style={{ position:"sticky", top:0, zIndex:10, background:"#f8fafc" }}>
                     {["時間","操作者","角色","動作","護理師","日期","班別"].map(h => (
-                      <th key={h} style={{ padding:"8px 6px", fontSize:12, fontWeight:700, color:"#6b7280", textAlign:"left", borderBottom:"2px solid #e5e7eb", background:"#f8fafc" }}>{h}</th>
+                      <th key={h} style={{ padding:"8px 4px", fontSize:12, fontWeight:700, color:"#6b7280", textAlign:"center", borderBottom:"2px solid #e5e7eb", background:"#f8fafc", whiteSpace:"nowrap" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -2413,27 +2415,28 @@ export default function AdminPage() {
                     const nurseName    = users.find(u => u.uid === log.nurse_uid)?.name ?? log.nurse_uid;
                     const roleShort: Record<string,string> = { nurse:"護", dual:"兼", admin:"管", superadmin:"超" };
                     const logDate = log.date ? dayjs(log.date).format("MM/DD") : "";
+                    const tdC: React.CSSProperties = { padding:"7px 4px", textAlign:"center", borderBottom:"1px solid #f3f4f6" };
                     return (
-                      <tr key={i} style={{ borderBottom:"1px solid #f3f4f6" }}>
-                        <td style={{ padding:"7px 6px", fontSize:12, color:"#9ca3af", wordBreak:"break-word" }}>
+                      <tr key={i}>
+                        <td style={{ ...tdC, fontSize:12, color:"#9ca3af", lineHeight:1.5 }}>
                           {dayjs(log.created_at).format("MM/DD")}<br />{dayjs(log.created_at).format("HH:mm")}
                         </td>
-                        <td style={{ padding:"7px 6px", fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{operatorName}</td>
-                        <td style={{ padding:"7px 6px" }}>
+                        <td style={{ ...tdC, fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{operatorName}</td>
+                        <td style={{ ...tdC }}>
                           <span className={`badge badge-${log.operator_role==="nurse"?"nurse":log.operator_role==="dual"?"dual":log.operator_role==="admin"?"admin":"super"}`}>
                             {roleShort[log.operator_role] ?? log.operator_role}
                           </span>
                         </td>
-                        <td style={{ padding:"7px 6px", fontSize:12 }}>
-                          {log.action==="confirm" ? <span style={{ color:"#16a34a", fontWeight:700 }}>✓ 確認</span>
-                            : log.action==="unconfirm" ? <span style={{ color:"#f59e0b", fontWeight:700 }}>↩ 取消確認</span>
+                        <td style={{ ...tdC, fontSize:12 }}>
+                          {log.action==="confirm" ? <span style={{ color:"#16a34a", fontWeight:700 }}>✓確認</span>
+                            : log.action==="unconfirm" ? <span style={{ color:"#f59e0b", fontWeight:700 }}>↩取消</span>
                             : <span style={{ color:"#6b7280" }}>編輯</span>}
                         </td>
-                        <td style={{ padding:"7px 6px", fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{nurseName}</td>
-                        <td style={{ padding:"7px 6px", fontSize:12, color:"#374151" }}>{logDate}</td>
-                        <td style={{ padding:"7px 6px" }}>
+                        <td style={{ ...tdC, fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{nurseName}</td>
+                        <td style={{ ...tdC, fontSize:12, color:"#374151" }}>{logDate}</td>
+                        <td style={{ ...tdC }}>
                           {log.shift
-                            ? <span style={{ fontWeight:700, color: isOff(log.shift, offShifts)?"#dc2626":"#111827" }}>{log.shift}</span>
+                            ? <span style={{ fontWeight:700, fontSize:12, color: isOff(log.shift, offShifts)?"#dc2626":"#111827" }}>{log.shift}</span>
                             : <span style={{ color:"#d1d5db" }}>─</span>}
                         </td>
                       </tr>
@@ -2639,6 +2642,6 @@ export default function AdminPage() {
       {toast.msg && (
         <div className={`ap-toast ${toast.ok?"ok":"err"}`}>{toast.msg}</div>
       )}
-    </>
+    </div>
   );
 }

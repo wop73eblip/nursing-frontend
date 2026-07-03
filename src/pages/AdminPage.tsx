@@ -1712,7 +1712,7 @@ export default function AdminPage() {
                       <span
                         className="drag-handle"
                         style={{
-                          position: "absolute", left: 6, top: "50%", transform: "translateY(-50%)",
+                          position: "absolute", left: -40, top: "50%", transform: "translateY(-50%)",
                           color: userDragEnabled ? "#9ca3af" : "#e5e7eb",
                           cursor: userDragEnabled ? "grab" : "default",
                           fontSize: 15, userSelect: "none", lineHeight: 1,

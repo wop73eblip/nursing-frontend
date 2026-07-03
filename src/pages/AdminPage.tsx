@@ -2365,7 +2365,7 @@ export default function AdminPage() {
                   <div>• 連續 OFF 總上限：指定休 + 自動休合計連休不得超過設定值（特休等放假/調整類自動中斷計算）</div>
                   <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginTop:6, marginBottom:2 }}>── 軟規則（人力允許時盡量遵守）──</div>
                   <div>• 固定班（固定 D / E / N）：整週期以同一班種為主，人力缺口才少數換班</div>
-                  <div>• 軟規則 A：盡量順班 + 切換前盡量安排休息（固定啟用）</div>
+                  <div>• 盡量順班 + 切換前盡量安排休息（固定啟用）</div>
                   <div style={{ paddingLeft:12, color:"#6b7280", fontSize:12 }}>不休息直接切換班別 懲罰 +3；隔至少一天 OFF 再切換 懲罰 +2；不切換（同班種） 懲罰 0</div>
                   <div>• 各護理師班次數接近設定比例（允許 ±2 天偏差）</div>
                 </div>
@@ -2537,7 +2537,7 @@ export default function AdminPage() {
 
                   {/* 順班規則說明 */}
                   <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:10, padding:"14px 16px", fontSize:13, color:"#1e40af", lineHeight:1.8 }}>
-                    <b>軟規則 A：盡量順班 + 切換前盡量安排休息（固定啟用）</b><br />
+                    <b>盡量順班 + 切換前盡量安排休息（固定啟用）</b><br />
                     <span style={{ color:"#374151" }}>
                       • <b>輪班類（DE／EN／DN／DEN）：</b>同種班別連排後再換，切換時盡量先安排一天 OFF。<br />
                       &emsp;懲罰值：<b>直接切換班別 +3</b>｜<b>隔 OFF 天再切換 +2</b>｜同班種連排 ±0<br />
@@ -2575,7 +2575,7 @@ export default function AdminPage() {
                       <div>連續 OFF 總上限：<b>{rulesForm.weekly_max_off_total}</b> 天（指定休 + 自動休合計連休 ≤ {rulesForm.weekly_max_off_total} 天）</div>
                       <div style={{ marginTop:4, fontWeight:700, color:"#6b7280", fontSize:12 }}>── 軟規則（盡量遵守）──</div>
                       <div>固定班（固定D/E/N）：整週期幾乎全排同一班種，人力不足才允許少數換班</div>
-                      <div>軟規則 A：盡量順班 + 切換前安排休息（固定啟用）</div>
+                      <div>盡量順班 + 切換前安排休息（固定啟用）</div>
                       <div style={{ fontSize:12, color:"#9ca3af", paddingLeft:8 }}>直接切換 +3｜隔 OFF 再切換 +2｜不切換 ±0</div>
                     </div>
                   </div>

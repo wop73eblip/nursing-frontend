@@ -326,7 +326,7 @@ export default function AdminPage() {
     restrict_first_weekend: true,  // 規則5：首個週末不同時休
     weekly_max_off_auto: 2,        // 規則6：自動休每週上限
     weekly_max_off_total: 3,       // 規則7：含指定休每週上限
-    one_in_seven: false,           // 規則8：一例一休（每週≥2天休）
+    one_in_seven: true,            // 規則8：一例一休（每週≥2天休）
     lock_designated_off: true,     // 規則10：指定休不可覆蓋
     notes: "",
   });
@@ -2129,16 +2129,6 @@ export default function AdminPage() {
                           <span style={{ fontSize:12, color:"#6b7280" }}>禁止 N→D、N→E、E→D 反向排列。大夜後不能排白班或小夜，小夜後不能排白班。</span>
                         </div>
                       </div>
-                      <div style={{ display:"flex", alignItems:"flex-start", gap:8, marginTop:10 }}>
-                        <label className="fcheck" style={{ marginTop:2 }}>
-                          <input type="checkbox" checked={rulesForm.prefer_smooth}
-                            onChange={e => setRulesForm(p=>({...p,prefer_smooth:e.target.checked}))} />
-                        </label>
-                        <div>
-                          <b>盡量順班（軟規則）</b><br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>以最少換班次數排班：同種班別排成連續區塊（含穿插休假），排完再換下一種班。輪班 DE 例：先把 D 全排完，再排 E，而非 DDEEDDEE 交替。</span>
-                        </div>
-                      </div>
                     </div>
                   </div>
 
@@ -2185,10 +2175,10 @@ export default function AdminPage() {
                           <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>自動休最多連續 N 天，超過視為違規</div>
                         </div>
                         <div>
-                          <label className="flabel">每週應休總上限（天）</label>
+                          <label className="flabel">連續 OFF 總上限（天）</label>
                           <NumInput className="finput" min={1} max={7} value={rulesForm.weekly_max_off_total}
                             onChange={n => setRulesForm(p=>({...p,weekly_max_off_total:n}))} />
-                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>一週應休總上限 = 指定休 + 自動休</div>
+                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>指定休 + 自動休合計不可連續超過 N 天（特休等放假/調整類自動中斷計算）</div>
                         </div>
                       </div>
                     </div>
@@ -2372,7 +2362,7 @@ export default function AdminPage() {
                   <div>• 第一天鎖定：週期第一天已有記錄時鎖定，不被生成覆蓋</div>
                   <div>• 首個週末：週期第一個週六、週日不可同時休假</div>
                   <div>• 自動休連續上限 N 天：系統排的休假不超過 N 天連休（指定休可中斷計算）</div>
-                  <div>• 每週應休總上限：指定休 + 自動休 ≤ 設定值（放假 / 調整類不計）</div>
+                  <div>• 連續 OFF 總上限：指定休 + 自動休合計連休不得超過設定值（特休等放假/調整類自動中斷計算）</div>
                   <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginTop:6, marginBottom:2 }}>── 軟規則（人力允許時盡量遵守）──</div>
                   <div>• 固定班（固定 D / E / N）：整週期以同一班種為主，人力缺口才少數換班</div>
                   <div>• 輪班類：盡量順班，同種班連排後再換下一種班</div>
@@ -2580,11 +2570,11 @@ export default function AdminPage() {
                       <div>指定休不可覆蓋：<b>{rulesForm.lock_designated_off ? "✓ 啟用" : "停用"}</b></div>
                       <div>第一天鎖定：<b>{rulesForm.lock_first_day ? "✓ 啟用" : "停用"}</b></div>
                       <div>首個週末連休限制：<b>{rulesForm.restrict_first_weekend ? "✓ 啟用" : "停用"}</b></div>
-                      <div>自動休連續上限：<b>{rulesForm.weekly_max_off_auto}</b> 天（禁止超過 {rulesForm.weekly_max_off_auto} 天連休）</div>
-                      <div>每週應休總上限：<b>{rulesForm.weekly_max_off_total}</b> 天（= 指定休 + 自動休 ≤ {rulesForm.weekly_max_off_total}）</div>
+                      <div>自動休連續上限：<b>{rulesForm.weekly_max_off_auto}</b> 天（自動排的 OFF 不超過 {rulesForm.weekly_max_off_auto} 天連休）</div>
+                      <div>連續 OFF 總上限：<b>{rulesForm.weekly_max_off_total}</b> 天（指定休 + 自動休合計連休 ≤ {rulesForm.weekly_max_off_total} 天）</div>
                       <div style={{ marginTop:4, fontWeight:700, color:"#6b7280", fontSize:12 }}>── 軟規則（盡量遵守）──</div>
                       <div>固定班（固定D/E/N）：整週期幾乎全排同一班種，人力不足才允許少數換班</div>
-                      <div>輪班類：盡量順班，同種班連排後再換下一種{rulesForm.prefer_smooth ? "（✓ 啟用）" : "（停用）"}</div>
+                      <div>輪班類：盡量順班，同種班連排後再換下一種（固定啟用）</div>
                     </div>
                   </div>
 

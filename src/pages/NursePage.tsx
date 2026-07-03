@@ -824,6 +824,9 @@ export default function NursePage() {
               <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
                 藍色列為您的班表，點格子可填寫；其他同事為唯讀
               </div>
+              <div style={{ fontSize: 11, color: "#c4b5fd", marginTop: 2 }}>
+                📱 手機關閉直向鎖定、橫向可觀看比較多日期
+              </div>
             </div>
             {!cycleRange && (
               <input type="month" value={ym} onChange={e => setYm(e.target.value)} />

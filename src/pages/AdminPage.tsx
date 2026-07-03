@@ -2511,89 +2511,134 @@ export default function AdminPage() {
         {tab === "generate" && (() => {
           const [generating, setGenerating] = useState(false);
           const [genResult, setGenResult] = useState<string>("");
+          const [genWarnings, setGenWarnings] = useState<string[]>([]);
+          const [genAnomalies, setGenAnomalies] = useState<string[]>([]);
           const [overwriteConfirmed, setOverwriteConfirmed] = useState(false);
           const [confirmGenerate, setConfirmGenerate] = useState(false);
+          const [hasGenerated, setHasGenerated] = useState(false);
+
+          const unconfirmedCount = schedule.filter(r => cycleDays.includes(r.date) && !r.confirmed && r.shift).length;
+          const confirmedCount   = schedule.filter(r => cycleDays.includes(r.date) && r.confirmed).length;
+          const filledCount      = schedule.filter(r => cycleDays.includes(r.date) && r.shift).length;
 
           async function runGenerate() {
-            setGenerating(true); setGenResult(""); setConfirmGenerate(false);
+            setGenerating(true); setGenResult(""); setGenWarnings([]); setGenAnomalies([]); setConfirmGenerate(false);
             try {
               const { data } = await api.post(
                 `/schedule/generate?overwrite_confirmed=${overwriteConfirmed}`
               );
               setGenResult(data.message ?? "完成");
+              setGenWarnings(data.warnings ?? []);
+              setGenAnomalies(data.anomalies ?? []);
+              setHasGenerated(true);
               fetchSchedule();
             } catch (err: any) {
               setGenResult("✗ " + (err.response?.data?.detail ?? err.message ?? "生成失敗"));
             } finally { setGenerating(false); }
           }
 
+          function downloadExport(type: "preview" | "schedule") {
+            const token = getAuth()?.token;
+            const a = document.createElement("a");
+            a.href = `${(api.defaults.baseURL ?? "").replace(/\/$/, "")}/export/${type}`;
+            // 用 fetch + blob 下載（帶 Authorization header）
+            fetch(a.href, { headers: { Authorization: `Bearer ${token}` } })
+              .then(r => r.blob())
+              .then(blob => {
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = type === "preview"
+                  ? `預假狀態_${cycle.start_date}_${cycle.end_date}.xlsx`
+                  : `完整班表_${cycle.start_date}_${cycle.end_date}.xlsx`;
+                link.click();
+                URL.revokeObjectURL(url);
+              });
+          }
+
+          // 確認清單 item
+          const CheckItem = ({ ok, warn, label }: { ok: boolean; warn?: boolean; label: string }) => (
+            <div style={{ display:"flex", alignItems:"center", gap:8, fontSize:13 }}>
+              <span style={{ fontSize:15, color: ok ? "#16a34a" : warn ? "#d97706" : "#dc2626", flexShrink:0 }}>
+                {ok ? "✓" : warn ? "！" : "✗"}
+              </span>
+              <span style={{ color: ok ? "#374151" : warn ? "#92400e" : "#dc2626" }}>{label}</span>
+            </div>
+          );
+
           return (
           <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth:620 }}>
-            {/* 說明卡 */}
             <div className="card">
               <div className="card-head"><div style={{ fontSize:16, fontWeight:700 }}>一鍵生成排班</div></div>
               <div className="card-body">
                 <div className="fl">
 
-                  {/* 順班規則說明 */}
+                  {/* ── 生成前確認清單 */}
+                  <div className="setting-section">
+                    <div className="setting-title">生成前確認清單</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                      <CheckItem
+                        ok={cycleIsSet}
+                        label={cycleIsSet
+                          ? `排班週期：${cycle.start_date} ～ ${cycle.end_date}（${cycle.period_days} 天）`
+                          : "尚未設定排班週期，請先至「排班週期」tab 設定"}
+                      />
+                      <CheckItem
+                        ok={nurseUsers.length > 0}
+                        label={`護理師人數：${nurseUsers.length} 人`}
+                      />
+                      <CheckItem
+                        ok={true}
+                        label={`全職應休 ${fullTimeOff} 天｜半職應休 ${partTimeOff} 天`}
+                      />
+                      <CheckItem
+                        ok={filledCount === 0}
+                        warn={filledCount > 0 && unconfirmedCount === 0}
+                        label={filledCount === 0
+                          ? "目前無已填班別，將全部由系統生成"
+                          : `已填 ${filledCount} 格（已確認 ${confirmedCount} 格、待確認 ${unconfirmedCount} 格）——空白格子將由系統填入`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* ── 順班規則說明 */}
                   <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:10, padding:"14px 16px", fontSize:13, color:"#1e40af", lineHeight:1.8 }}>
                     <b>盡量順班 + 切換前盡量安排休息（固定啟用）</b><br />
                     <span style={{ color:"#374151" }}>
                       • <b>輪班類（DE／EN／DN／DEN）：</b>同種班別連排後再換，切換時盡量先安排一天 OFF。<br />
-                      &emsp;懲罰值：<b>直接切換班別 +3</b>｜<b>隔 OFF 天再切換 +2</b>｜同班種連排 ±0<br />
-                      &emsp;例如 DE 比例 1:2：
-                      <code style={{ background:"#dbeafe", padding:"1px 5px", borderRadius:4, fontSize:12 }}>
-                        DDD-OFF-DD│<b>OFF</b>-E-OFF-EE│EEE-OFF-EEO
-                      </code>（切換前加 OFF = +2）<br />
+                      &emsp;懲罰值：<b>直接切換 +3</b>｜<b>隔 OFF 再切換 +2</b>｜同班種 ±0（跨週亦同）<br />
                       • <b>固定D／E／N：</b>整週期幾乎全排同一種班，僅在人力缺口時才少數換班。
                     </span>
                   </div>
 
-                  {/* 將套用的規則 */}
+                  {/* ── 將套用的規則 */}
                   <div className="setting-section">
-                    <div className="setting-title">📋 將套用的規則</div>
-                    <div style={{ display:"flex", flexDirection:"column", gap:6, fontSize:13, color:"#374151" }}>
-                      {!cycleIsSet && (
-                        <div style={{ color:"#dc2626", fontWeight:600 }}>⚠ 尚未設定排班週期，請先至「排班週期」tab 設定</div>
-                      )}
-                      {cycleIsSet && (
-                        <div>排班週期：<b>{cycle.start_date}</b> ～ <b>{cycle.end_date}</b>（共 {cycle.period_days} 天）</div>
-                      )}
-                      <div style={{ marginTop:4, fontWeight:700, color:"#6b7280", fontSize:12 }}>── 硬規則（一定遵守）──</div>
-                      <div>每班每日人數：D = <b>{rulesForm.daily_d}</b>、E = <b>{rulesForm.daily_e}</b>、N = <b>{rulesForm.daily_n}</b> 人（剛好符合）</div>
-                      <div>反向班禁止：<b>{rulesForm.no_reverse_shift ? "✓ 啟用" : "停用"}</b>（E→D 需隔 1 休；N→E/D 需隔 1~2 休）</div>
-                      <div>每週至少 <b>{rulesForm.one_in_seven ? "2" : "1"}</b> 天休假{rulesForm.one_in_seven ? "（一例一休）" : ""}</div>
-                      <div>每週 D/E/N 至多兩種班別：<b>{rulesForm.weekly_max_two_shifts ? "✓ 啟用" : "停用"}</b></div>
-                      <div>連續上班上限：<b>{rulesForm.max_consecutive_work}</b> 天</div>
-                      <div>全職應休：<b>{fullTimeOff}</b> 天｜半職應休：<b>{partTimeOff}</b> 天</div>
-                      <div>放假/調整類（V 特休、員旅、喪假、延休、補休、調移）：最高優先，不佔應休名額</div>
-                      <div style={{ marginTop:4, fontWeight:700, color:"#6b7280", fontSize:12 }}>── 休假規則 ──</div>
-                      <div>指定休不可覆蓋：<b>{rulesForm.lock_designated_off ? "✓ 啟用" : "停用"}</b></div>
-                      <div>第一天鎖定：<b>{rulesForm.lock_first_day ? "✓ 啟用" : "停用"}</b></div>
-                      <div>首個週末連休限制：<b>{rulesForm.restrict_first_weekend ? "✓ 啟用" : "停用"}</b></div>
-                      <div>自動休連續上限：<b>{rulesForm.weekly_max_off_auto}</b> 天（自動排的 OFF 不超過 {rulesForm.weekly_max_off_auto} 天連休）</div>
-                      <div>連續 OFF 總上限：<b>{rulesForm.weekly_max_off_total}</b> 天（指定休 + 自動休合計連休 ≤ {rulesForm.weekly_max_off_total} 天）</div>
-                      <div style={{ marginTop:4, fontWeight:700, color:"#6b7280", fontSize:12 }}>── 軟規則（盡量遵守）──</div>
-                      <div>固定班（固定D/E/N）：整週期幾乎全排同一班種，人力不足才允許少數換班</div>
-                      <div>盡量順班 + 切換前安排休息（固定啟用）</div>
-                      <div style={{ fontSize:12, color:"#9ca3af", paddingLeft:8 }}>直接切換 +3｜隔 OFF 再切換 +2｜不切換 ±0</div>
+                    <div className="setting-title">將套用的規則</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, color:"#374151", lineHeight:1.7 }}>
+                      <div style={{ fontWeight:700, color:"#6b7280", fontSize:11 }}>── 硬規則 ──</div>
+                      <div>每班每日人數：D = <b>{rulesForm.daily_d}</b>、E = <b>{rulesForm.daily_e}</b>、N = <b>{rulesForm.daily_n}</b> 人</div>
+                      <div>反向班禁止：<b>{rulesForm.no_reverse_shift ? "✓" : "停用"}</b>　每週至少 <b>{rulesForm.one_in_seven ? "2" : "1"}</b> 天休假{rulesForm.one_in_seven ? "（一例一休）" : ""}　每週至多兩種班別：<b>{rulesForm.weekly_max_two_shifts ? "✓" : "停用"}</b></div>
+                      <div>連續上班上限 <b>{rulesForm.max_consecutive_work}</b> 天（含跨週計算）　連續 OFF 總上限 <b>{rulesForm.weekly_max_off_total}</b> 天</div>
+                      <div>自動休連續上限 <b>{rulesForm.weekly_max_off_auto}</b> 天　指定休不可覆蓋：<b>{rulesForm.lock_designated_off ? "✓" : "停用"}</b>　第一天鎖定：<b>{rulesForm.lock_first_day ? "✓" : "停用"}</b></div>
+                      <div style={{ fontWeight:700, color:"#6b7280", fontSize:11, marginTop:2 }}>── 軟規則 ──</div>
+                      <div>固定班整週期排同班種（偏離懲罰 +20）　盡量順班 + 切換前安排休息（直接切換 +3｜隔 OFF +2）</div>
                     </div>
                   </div>
 
-                  {/* 選項 */}
+                  {/* ── 選項 */}
                   <div className="setting-section">
-                    <div className="setting-title">⚙ 選項</div>
+                    <div className="setting-title">選項</div>
                     <label className="fcheck">
                       <input type="checkbox" checked={overwriteConfirmed}
                         onChange={e => setOverwriteConfirmed(e.target.checked)} />
                       <span style={{ fontSize:13 }}>覆蓋已確認送出的班別</span>
                     </label>
                     <div style={{ fontSize:12, color:"#9ca3af", marginTop:4 }}>
-                      勾選後，已確認班也會被新生成的排班覆蓋；未勾選則只填入空白格子。
+                      未勾選：只填空白格子，已填班別（含未確認）一律保留。
                     </div>
                   </div>
 
-                  {/* 生成按鈕 */}
+                  {/* ── 生成按鈕 */}
                   {confirmGenerate ? (
                     <div style={{ background:"#fef9c3", border:"1px solid #fde68a", borderRadius:10, padding:"12px 16px" }}>
                       <div style={{ fontSize:13, fontWeight:700, color:"#92400e", marginBottom:8 }}>
@@ -2612,10 +2657,11 @@ export default function AdminPage() {
                       style={{ alignSelf:"flex-start" }}
                       disabled={!cycleIsSet || generating}
                       onClick={() => setConfirmGenerate(true)}>
-                      🤖 一鍵生成排班
+                      一鍵生成排班
                     </button>
                   )}
 
+                  {/* ── 生成結果 */}
                   {genResult && (
                     <div style={{
                       padding:"12px 16px", borderRadius:10, fontSize:13, fontWeight:600,
@@ -2624,6 +2670,49 @@ export default function AdminPage() {
                       border:     `1px solid ${genResult.startsWith("✗") ? "#fecaca" : "#bbf7d0"}`,
                     }}>{genResult}</div>
                   )}
+
+                  {/* ── 警告（人力不足縮減應休） */}
+                  {genWarnings.length > 0 && (
+                    <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, padding:"12px 16px", fontSize:13 }}>
+                      <div style={{ fontWeight:700, color:"#92400e", marginBottom:6 }}>人力不足警告</div>
+                      {genWarnings.map((w, i) => <div key={i} style={{ color:"#92400e" }}>{w}</div>)}
+                      <div style={{ fontSize:12, color:"#b45309", marginTop:6 }}>應休天數已平均縮減，請確認後再送出確認。</div>
+                    </div>
+                  )}
+
+                  {/* ── 異常標示 */}
+                  {genAnomalies.length > 0 && (
+                    <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"12px 16px", fontSize:13 }}>
+                      <div style={{ fontWeight:700, color:"#dc2626", marginBottom:6 }}>異常標示</div>
+                      {genAnomalies.map((a, i) => <div key={i} style={{ color:"#dc2626" }}>{a}</div>)}
+                    </div>
+                  )}
+
+                  {/* ── 匯出區塊 */}
+                  <div className="setting-section">
+                    <div className="setting-title">匯出 Excel（.xlsx）</div>
+                    <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                      <div>
+                        <button
+                          className="btn btn-gray"
+                          disabled={!cycleIsSet}
+                          onClick={() => downloadExport("preview")}>
+                          匯出預假狀態
+                        </button>
+                        <div style={{ fontSize:11, color:"#9ca3af", marginTop:4 }}>目前所有護理師已填寫的班別</div>
+                      </div>
+                      <div>
+                        <button
+                          className="btn btn-gray"
+                          disabled={!cycleIsSet || !hasGenerated}
+                          onClick={() => downloadExport("schedule")}>
+                          匯出完整班表
+                        </button>
+                        <div style={{ fontSize:11, color:"#9ca3af", marginTop:4 }}>生成後完整結果，人工填寫外框加粗</div>
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               </div>
             </div>

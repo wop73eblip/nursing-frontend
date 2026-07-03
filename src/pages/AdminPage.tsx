@@ -1703,7 +1703,7 @@ export default function AdminPage() {
                       ref={el => { userItemRefs.current[i] = el; }}
                       style={{
                         borderBottom: "1px solid #f3f4f6",
-                        padding: "10px 14px",
+                        padding: "10px 14px 10px 28px",
                         background: isDirty ? "#fffbeb" : undefined,
                         position: "relative",
                       }}
@@ -1712,7 +1712,7 @@ export default function AdminPage() {
                       <span
                         className="drag-handle"
                         style={{
-                          position: "absolute", left: -4, top: "50%", transform: "translateY(-50%)",
+                          position: "absolute", left: 6, top: "50%", transform: "translateY(-50%)",
                           color: userDragEnabled ? "#9ca3af" : "#e5e7eb",
                           cursor: userDragEnabled ? "grab" : "default",
                           fontSize: 15, userSelect: "none", lineHeight: 1,

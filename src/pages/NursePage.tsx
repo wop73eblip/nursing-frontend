@@ -223,6 +223,7 @@ export default function NursePage() {
   const [confirming, setConfirming] = useState(false);
   const [toast, setToast] = useState("");
   const toastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [lockFirstDay, setLockFirstDay] = useState(true);
 
   // 滑動選取
   const swipeRef  = useRef<{ startDate: string; dates: Set<string>; active: boolean } | null>(null);
@@ -321,6 +322,7 @@ export default function NursePage() {
       const r = rulesRes.data.rules ?? {};
       if (r.shifts?.work) setWorkShifts(r.shifts.work.map((s: any) => s.code));
       if (r.shifts?.off)  setOffShifts(r.shifts.off.map((s: any) => s.code));
+      setLockFirstDay(r.scheduling?.lock_first_day ?? true);
 
       let cycleStart = r.cycle?.start_date ?? "";
       let cycleEnd   = r.cycle?.end_date   ?? "";
@@ -420,7 +422,7 @@ export default function NursePage() {
     return () => window.removeEventListener("keyup", onKeyUp);
   }, []);
 
-  function handleCellTouchStart(e: React.TouchEvent<HTMLSpanElement>, date: string) {
+  function handleCellTouchStart(e: React.TouchEvent<HTMLSpanElement>, date: string, myNi: number) {
     e.preventDefault();
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
@@ -458,6 +460,8 @@ export default function NursePage() {
         if (!target) return;
         const cellDate = target.dataset.date;
         if (!cellDate) return;
+        // 跨列保護：只允許同一護理師的格子
+        if (target.dataset.ni !== String(myNi)) return;
 
         const allD = daysRef.current;
         const startIdx = allD.indexOf(swipeRef.current.startDate);
@@ -685,7 +689,7 @@ export default function NursePage() {
         .td-name.is-me { color: #1d4ed8; background: #eff6ff; }
 
         /* 日期欄 */
-        .th-day { padding: 6px 2px; text-align: center; font-size: 11px; font-weight: 700; color: #374151; background: #f8fafc; width: 42px; min-width: 42px; }
+        .th-day { padding: 6px 2px; text-align: center; font-size: 11px; font-weight: 700; color: #374151; background: #f8fafc; width: 42px; min-width: 42px; line-height: 1.3; }
         .th-day.we { color: #dc2626; }
 
         /* 班別格 */
@@ -819,15 +823,10 @@ export default function NursePage() {
           <div className="stats-bar">
             {Object.keys(myStats).length === 0
               ? <span style={{ color: "#d1d5db", fontWeight: 400 }}>本月尚未填寫預班</span>
-              : <>
-                  {Object.entries(myStats).map(([s, n]) => (
-                    <span key={s} style={{ color: shiftColor(s, offShifts) }}>{s} ×{n}</span>
-                  ))}
-                  <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400, marginLeft: 4 }}>
-                    ｜已確認 {Object.values(mySchedule).filter(v => v.confirmed).length} 格
-                    ／待確認 {Object.values(mySchedule).filter(v => !v.confirmed).length} 格
-                  </span>
-                </>
+              : <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400 }}>
+                  已確認 {Object.values(mySchedule).filter(v => v.confirmed).length} 格
+                  ／待確認 {Object.values(mySchedule).filter(v => !v.confirmed).length} 格
+                </span>
             }
           </div>
 
@@ -862,21 +861,23 @@ export default function NursePage() {
                     const isWe = dow === 0 || dow === 6;
                     return (
                       <th key={d} className={`th-day${isWe ? " we" : ""}`}>
+                        <div style={{ fontSize: 9, opacity: .6 }}>{String(dayjs(d).month() + 1).padStart(2, "0")}</div>
                         <div>{dayjs(d).date()}</div>
-                        <div style={{ fontSize: 10, opacity: .7 }}>{DOW_ZH[dow]}</div>
+                        <div style={{ fontSize: 9, opacity: .7 }}>{DOW_ZH[dow]}</div>
                       </th>
                     );
                   })}
                 </tr>
               </thead>
               <tbody>
-                {nurses.map(n => {
+                {nurses.map((n, ni) => {
                   const isMe = n.uid === user.uid;
                   const nSched = allSched[n.uid] ?? {};
                   return (
                     <tr key={n.uid}>
                       <td className={`td-name${isMe ? " is-me" : ""}`}>
-                        {n.name}{isMe ? " ★" : ""}
+                        <div>{n.name}{isMe ? " ★" : ""}</div>
+                        {n.attr && <div style={{ fontSize: 9, color: isMe ? "#93c5fd" : "#9ca3af", fontWeight: 400, marginTop: 1 }}>{n.attr}</div>}
                       </td>
                       {days.map(d => {
                         const entry     = nSched[d];
@@ -886,6 +887,7 @@ export default function NursePage() {
 
                         // 屬性不符（只對自己判斷）
                         const mismatch  = isMe ? !!attrMismatchMsg(shift ?? "", myAttr, offShifts) : false;
+                        const isDay1Locked = lockFirstDay && cycleRange && d === cycleRange.start;
 
                         const { cls, style } = cellStyleFor(shift, confirmed, isSaving, mismatch, offShifts);
                         const finalCls = `${cls}${!isMe ? " readonly" : ""}`;
@@ -908,6 +910,7 @@ export default function NursePage() {
                               className={finalCls + swipeCls + ctrlShiftCls}
                               style={style}
                               data-date={isMe ? d : undefined}
+                              data-ni={isMe ? String(ni) : undefined}
                               onClick={isMe && !isSuperAdmin ? (e) => {
                                 if (e.ctrlKey || e.metaKey) {
                                   e.preventDefault();
@@ -939,10 +942,11 @@ export default function NursePage() {
                                 setShiftAnchor({ date: d, shift: mySchedule[d]?.shift ?? "" });
                                 openCell(d);
                               } : undefined}
-                              onTouchStart={isMe && !isSuperAdmin ? (e) => handleCellTouchStart(e, d) : undefined}
+                              onTouchStart={isMe && !isSuperAdmin ? (e) => handleCellTouchStart(e, d, ni) : undefined}
                               title={title}
                             >
                               {shift ?? (isMe ? "+" : "")}
+                              {isDay1Locked && !shift && isMe && <span style={{ fontSize: 8, opacity: .5 }}>🔒</span>}
                             </span>
                           </td>
                         );

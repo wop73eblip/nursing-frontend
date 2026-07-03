@@ -13,10 +13,12 @@ const DEFAULT_WORK: ShiftDef[] = [
   { code: "公", label: "公假",   type: "work" },
   { code: "書記", label: "書記班", type: "work", admin_only: true },
 ];
+const DEFAULT_REST: ShiftDef[] = [
+  { code: "OFF", label: "休假", type: "rest" },
+  { code: "半",  label: "半職", type: "rest" },
+];
 const DEFAULT_OFF: ShiftDef[] = [
-  { code: "OFF", label: "休假", type: "off" },
   { code: "V",   label: "特休", type: "off" },
-  { code: "半",  label: "半職", type: "off" },
   { code: "喪",  label: "喪假", type: "off" },
   { code: "員",  label: "員旅", type: "off" },
   { code: "延休", label: "延休", type: "off", admin_only: true },
@@ -28,7 +30,7 @@ const ROLE_ABBR:   Record<string,string> = { nurse:"護", dual:"兼", admin:"管
 // ─── Types
 type Tab = "schedule"|"users"|"cycle"|"rules"|"shifts_cfg"|"generate"|"logs";
 
-interface ShiftDef { code: string; label: string; type: "work"|"off"; admin_only?: boolean; }
+interface ShiftDef { code: string; label: string; type: "work"|"rest"|"off"; admin_only?: boolean; }
 interface User {
   uid: string; name: string; role: string; level: string;
   attr: string; halftime: boolean; note: string; sort_order: number;
@@ -226,7 +228,9 @@ export default function AdminPage() {
 
   // 班別設定（從 rules 讀出，預設為 DEFAULT）
   const [workShifts, setWorkShifts] = useState<ShiftDef[]>(DEFAULT_WORK);
-  const [offShifts, setOffShifts] = useState<ShiftDef[]>(DEFAULT_OFF);
+  const [restShifts, setRestShifts] = useState<ShiftDef[]>(DEFAULT_REST);
+  const [offShifts,  setOffShifts]  = useState<ShiftDef[]>(DEFAULT_OFF);
+  const allOffShifts = [...restShifts, ...offShifts];
 
   // 班表 tab
   const [popup, setPopup] = useState<{ date: string; nurseUid: string; nurseName: string } | null>(null);
@@ -280,6 +284,7 @@ export default function AdminPage() {
   // 拖曳排序
   const userItemRefs  = useRef<(HTMLDivElement | null)[]>([]);
   const shiftWorkRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const shiftRestRefs = useRef<(HTMLDivElement | null)[]>([]);
   const shiftOffRefs  = useRef<(HTMLDivElement | null)[]>([]);
   const [userDragEnabled,  setUserDragEnabled]  = useState(false);
   const [shiftDragEnabled, setShiftDragEnabled] = useState(false);
@@ -294,6 +299,7 @@ export default function AdminPage() {
     end_date: "",        // YYYY-MM-DD
     period_days: 28,     // 週期長度（天）
     deadline_date: "",   // 填表截止日 YYYY-MM-DD
+    deadline_time: "23:59", // 填表截止時間 HH:MM
     holiday_days: 0,     // 國定假日天數 0~5
   });
 
@@ -312,7 +318,7 @@ export default function AdminPage() {
     weekly_max_off_auto: 2,        // 規則6：自動休每週上限
     weekly_max_off_total: 3,       // 規則7：含指定休每週上限
     one_in_seven: false,           // 規則8：一例一休（每週≥2天休）
-    lock_designated_off: false,    // 規則10：指定休不可覆蓋
+    lock_designated_off: true,     // 規則10：指定休不可覆蓋
     notes: "",
   });
 
@@ -329,11 +335,12 @@ export default function AdminPage() {
   const [ratioOverrides, setRatioOverrides] = useState<RatioOverride[]>([]);
   // 帳號管理：attr 變更提示
   const [attrChangeWarn, setAttrChangeWarn] = useState<{ uid: string; oldAttr: string; newAttr: string } | null>(null);
-  const [deleteShiftTarget, setDeleteShiftTarget] = useState<{type:"work"|"off"; idx:number; code:string} | null>(null);
+  const [deleteShiftTarget, setDeleteShiftTarget] = useState<{type:"work"|"rest"|"off"; idx:number; code:string} | null>(null);
 
   // 班別設定編輯暫存（含 admin_only 旗標）
   const [editWorkShifts, setEditWorkShifts] = useState<ShiftDef[]>(DEFAULT_WORK);
-  const [editOffShifts, setEditOffShifts] = useState<ShiftDef[]>(DEFAULT_OFF);
+  const [editRestShifts, setEditRestShifts] = useState<ShiftDef[]>(DEFAULT_REST);
+  const [editOffShifts,  setEditOffShifts]  = useState<ShiftDef[]>(DEFAULT_OFF);
 
   // Toast
   const [toast, setToast] = useState({ msg:"", ok:true });
@@ -388,7 +395,7 @@ export default function AdminPage() {
   for (const d of allDays) {
     dailyOff[d] = nurseUsers.filter(u => {
       const s = schedule.find(r => r.nurse_uid===u.uid && r.date===d)?.shift;
-      return s && isOff(s, offShifts);
+      return s && isOff(s, allOffShifts);
     }).length;
   }
 
@@ -674,6 +681,7 @@ export default function AdminPage() {
       if (r.ratio) setRatioForm(prev => ({ ...prev, ...r.ratio }));
       if (r.ratio_overrides) setRatioOverrides(r.ratio_overrides);
       if (r.shifts?.work) { setWorkShifts(r.shifts.work); setEditWorkShifts(r.shifts.work); }
+      if (r.shifts?.rest) { setRestShifts(r.shifts.rest); setEditRestShifts(r.shifts.rest); }
       if (r.shifts?.off)  { setOffShifts(r.shifts.off);  setEditOffShifts(r.shifts.off);   }
     } catch {}
   }
@@ -924,12 +932,12 @@ export default function AdminPage() {
     startDragSession(startY, userItemRefs, idx, count, (from, to) => dropUser(from, to));
   }
 
-  function handleShiftDragStart(startY: number, type: "work"|"off", idx: number) {
-    const refs = type === "work" ? shiftWorkRefs : shiftOffRefs;
-    const list = type === "work" ? editWorkShifts : editOffShifts;
+  function handleShiftDragStart(startY: number, type: "work"|"rest"|"off", idx: number) {
+    const refs = type === "work" ? shiftWorkRefs : type === "rest" ? shiftRestRefs : shiftOffRefs;
+    const list = type === "work" ? editWorkShifts : type === "rest" ? editRestShifts : editOffShifts;
     startDragSession(startY, refs, idx, list.length, (from, to) => {
       if (from !== to) {
-        const setter = type === "work" ? setEditWorkShifts : setEditOffShifts;
+        const setter = type === "work" ? setEditWorkShifts : type === "rest" ? setEditRestShifts : setEditOffShifts;
         setter(prev => {
           const arr = [...prev];
           const [moved] = arr.splice(from, 1);
@@ -1124,8 +1132,9 @@ export default function AdminPage() {
   }
   async function saveShiftConfig() {
     try {
-      await api.post("/rules", { rules: { shifts: { work: editWorkShifts, off: editOffShifts } } });
+      await api.post("/rules", { rules: { shifts: { work: editWorkShifts, rest: editRestShifts, off: editOffShifts } } });
       setWorkShifts(editWorkShifts);
+      setRestShifts(editRestShifts);
       setOffShifts(editOffShifts);
       showToast("✓ 班別設定已儲存");
     } catch (err: any) {
@@ -1134,24 +1143,28 @@ export default function AdminPage() {
   }
 
   // ── 班別設定：新增 / 移除 / 改名
-  function addShift(type: "work"|"off") {
+  function addShift(type: "work"|"rest"|"off") {
     const s: ShiftDef = { code: "", label: "", type };
     if (type === "work") setEditWorkShifts(p => [...p, s]);
+    else if (type === "rest") setEditRestShifts(p => [...p, s]);
     else setEditOffShifts(p => [...p, s]);
   }
-  function removeShift(type: "work"|"off", idx: number) {
-    const code = (type === "work" ? editWorkShifts : editOffShifts)[idx]?.code || "?";
+  function removeShift(type: "work"|"rest"|"off", idx: number) {
+    const list = type === "work" ? editWorkShifts : type === "rest" ? editRestShifts : editOffShifts;
+    const code = list[idx]?.code || "?";
     setDeleteShiftTarget({ type, idx, code });
   }
   function confirmRemoveShift() {
     if (!deleteShiftTarget) return;
     const { type, idx } = deleteShiftTarget;
     if (type === "work") setEditWorkShifts(p => p.filter((_,i) => i!==idx));
+    else if (type === "rest") setEditRestShifts(p => p.filter((_,i) => i!==idx));
     else setEditOffShifts(p => p.filter((_,i) => i!==idx));
     setDeleteShiftTarget(null);
   }
-  function updateShiftDef(type: "work"|"off", idx: number, field: keyof ShiftDef, val: unknown) {
+  function updateShiftDef(type: "work"|"rest"|"off", idx: number, field: keyof ShiftDef, val: unknown) {
     if (type === "work") setEditWorkShifts(p => p.map((s,i) => i===idx ? {...s,[field]:val} : s));
+    else if (type === "rest") setEditRestShifts(p => p.map((s,i) => i===idx ? {...s,[field]:val} : s));
     else setEditOffShifts(p => p.map((s,i) => i===idx ? {...s,[field]:val} : s));
   }
 
@@ -1162,7 +1175,7 @@ export default function AdminPage() {
     if (saving) { cls += " is-saving"; }
     else if (!shift) { cls += " is-empty"; }
     else if (confirmed) { style = { background:"#166534", borderColor:"#14532d", color:"#fff" }; }
-    else { style = { background:"#dcfce7", borderColor:"#16a34a", color: shiftColor(shift, offShifts) }; }
+    else { style = { background:"#dcfce7", borderColor:"#16a34a", color: shiftColor(shift, allOffShifts) }; }
     return { cls, style };
   }
 
@@ -1421,11 +1434,6 @@ export default function AdminPage() {
             {/* 統計 */}
             <div style={{ padding:"10px 20px", display:"flex", flexWrap:"wrap", gap:"8px 18px", alignItems:"center", borderBottom:"1px solid #f3f4f6", fontSize:13 }}>
               <span style={{ color:"#9ca3af", fontWeight:400 }}>共 {nurseUsers.length} 人</span>
-              {[...workShifts, ...offShifts].filter(s => schedule.some(r=>r.shift===s.code && cycleDays.includes(r.date))).map(s => {
-                const cnt = schedule.filter(r=>r.shift===s.code && cycleDays.includes(r.date)).length;
-                return <span key={s.code} style={{ fontWeight:700, color: isOff(s.code, offShifts)?"#dc2626":"#111827" }}>{s.code} ×{cnt}</span>;
-              })}
-              {!schedule.length && <span style={{ color:"#d1d5db" }}>尚無班別資料</span>}
               <span style={{ marginLeft:"auto", fontSize:12, color:"#6b7280" }}>
                 已確認 {schedule.filter(r=>cycleDays.includes(r.date)&&r.confirmed).length} 格 ／
                 待確認 {schedule.filter(r=>cycleDays.includes(r.date)&&!r.confirmed&&r.shift).length} 格
@@ -1464,7 +1472,7 @@ export default function AdminPage() {
                     </tr>
                   )}
                   <tr>
-                    <th className="sticky-name sticky-name-head" style={{ minWidth:80, width:80, padding:"9px 12px" }}>護理師</th>
+                    <th className="sticky-name sticky-name-head" style={{ minWidth:80, width:80, padding:"9px 12px" }}>姓名</th>
                     {allDays.map(d => {
                       const isRef = refDays.includes(d);
                       const dow = dayjs(d).day();
@@ -1937,19 +1945,23 @@ export default function AdminPage() {
                   {/* ── 填表截止日 */}
                   <div className="setting-section">
                     <div className="setting-title">⏰ 填表截止日</div>
-                    <div style={{ maxWidth:300 }}>
+                    <div style={{ maxWidth:380 }}>
                       <label className="flabel">護理師填表截止日期</label>
-                      <input className="finput" type="date" value={cycle.deadline_date}
-                        onChange={e => setCycle(p=>({...p,deadline_date:e.target.value}))} />
+                      <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                        <input className="finput" type="date" value={cycle.deadline_date}
+                          onChange={e => setCycle(p=>({...p,deadline_date:e.target.value}))} style={{ flex:1 }} />
+                        <input className="finput" type="time" value={cycle.deadline_time}
+                          onChange={e => setCycle(p=>({...p,deadline_time:e.target.value}))} style={{ width:110 }} />
+                      </div>
                       {cycle.deadline_date && (
                         <div style={{ fontSize:12, color:"#1d4ed8", marginTop:5, fontWeight:500 }}>
-                          {fmtDateDay(cycle.deadline_date)}
+                          {fmtDateDay(cycle.deadline_date)} {cycle.deadline_time}
                         </div>
                       )}
                     </div>
                     {cycle.deadline_date && (
                       <div style={{ marginTop:8, fontSize:12, color:"#6b7280" }}>
-                        護理師需在 <b style={{ color:"#dc2626" }}>{fmtDateDay(cycle.deadline_date)}</b> 前完成填寫並確認送出
+                        護理師需在 <b style={{ color:"#dc2626" }}>{fmtDateDay(cycle.deadline_date)} {cycle.deadline_time}</b> 前完成填寫並確認送出
                       </div>
                     )}
                   </div>
@@ -2116,7 +2128,7 @@ export default function AdminPage() {
                           onChange={e => setRulesForm(p=>({...p,restrict_first_weekend:e.target.checked}))} />
                         <div>
                           <span style={{ fontSize:13 }}>限制週期首個週末連休</span><br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>排班週期第一個週六和週日不可同時為休假（預設啟用）</span>
+                          <span style={{ fontSize:12, color:"#6b7280" }}>排班週期第一個週六和週日不可同時為休假</span>
                         </div>
                       </label>
 
@@ -2126,7 +2138,7 @@ export default function AdminPage() {
                           onChange={e => setRulesForm(p=>({...p,one_in_seven:e.target.checked}))} />
                         <div>
                           <span style={{ fontSize:13 }}>一例一休（每週至少 2 天休假）</span><br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>每週一到週日至少安排 2 天休假（預設關閉）</span>
+                          <span style={{ fontSize:12, color:"#6b7280" }}>每週一到週日至少安排 2 天休假</span>
                         </div>
                       </label>
 
@@ -2136,23 +2148,23 @@ export default function AdminPage() {
                           onChange={e => setRulesForm(p=>({...p,lock_designated_off:e.target.checked}))} />
                         <div>
                           <span style={{ fontSize:13 }}>指定休不可被覆蓋</span><br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>啟用時：人力不足則擋住生成並警告。停用時：指定休可被覆蓋，系統自動補休（預設關閉）</span>
+                          <span style={{ fontSize:12, color:"#6b7280" }}>啟用時：指定休（OFF）不被生成覆蓋。停用時：指定休可被覆蓋，系統自動補休</span>
                         </div>
                       </label>
 
-                      {/* 規則6/7：每週休假上限 */}
+                      {/* 規則6/7：連續休假 + 每週上限 */}
                       <div style={{ display:"flex", gap:20, marginTop:4 }}>
                         <div>
-                          <label className="flabel">自動休每週上限（天）</label>
+                          <label className="flabel">自動休連續上限（天）</label>
                           <NumInput className="finput" min={1} max={7} value={rulesForm.weekly_max_off_auto}
                             onChange={n => setRulesForm(p=>({...p,weekly_max_off_auto:n}))} />
-                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>系統自動安排的休假（預設 2 天）</div>
+                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>自動休最多連續 N 天，超過視為違規</div>
                         </div>
                         <div>
-                          <label className="flabel">含指定休每週上限（天）</label>
+                          <label className="flabel">每週應休總上限（天）</label>
                           <NumInput className="finput" min={1} max={7} value={rulesForm.weekly_max_off_total}
                             onChange={n => setRulesForm(p=>({...p,weekly_max_off_total:n}))} />
-                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>含指定休的總休假上限（預設 3 天）</div>
+                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>一週應休總上限 = 指定休 + 自動休</div>
                         </div>
                       </div>
                     </div>
@@ -2315,6 +2327,35 @@ export default function AdminPage() {
                 </div>
               </div>
             </div>
+
+            {/* 排班規則總覽說明卡 */}
+            <div className="card">
+              <div className="card-head"><div style={{ fontSize:15, fontWeight:700 }}>📋 排班規則總覽</div></div>
+              <div className="card-body">
+                <div style={{ display:"flex", flexDirection:"column", gap:6, fontSize:13, color:"#374151", lineHeight:1.8 }}>
+                  <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginBottom:2 }}>── 硬規則（一定遵守）──</div>
+                  <div>• 每班每日剛好符合設定人數（D / E / N 各班不多不少）</div>
+                  <div>• 反向班禁止：E→D 需隔 1 天休；N→E 需隔 1 天休；N→D 需隔 2 天休</div>
+                  <div>• 每週至少 1 天休假（勾選一例一休改為至少 2 天）</div>
+                  <div>• 每週 D/E/N 至多兩種班別，避免同週混排三種班型</div>
+                  <div>• 連續上班天數不超過設定值，跨週累計</div>
+                  <div>• 每班需有至少 1 位 leader，且至少 2 位 leader / second 層級</div>
+                  <div>• 全職應休 8 + 國定假日 天；半職應休 16 + 國定假日 天</div>
+                  <div>• 放假 / 調整類（特休 V、員旅、喪假、延休、補休、調移）：最高優先鎖定，不佔應休名額</div>
+                  <div>• 半職（半）視同應休，計入應休天數</div>
+                  <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginTop:6, marginBottom:2 }}>── 休假規則 ──</div>
+                  <div>• 指定休不可覆蓋：管理員標記的 OFF 不被生成取代</div>
+                  <div>• 第一天鎖定：週期第一天已有記錄時鎖定，不被生成覆蓋</div>
+                  <div>• 首個週末：週期第一個週六、週日不可同時休假</div>
+                  <div>• 自動休連續上限 N 天：系統排的休假不超過 N 天連休（指定休可中斷計算）</div>
+                  <div>• 每週應休總上限：指定休 + 自動休 ≤ 設定值（放假 / 調整類不計）</div>
+                  <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginTop:6, marginBottom:2 }}>── 軟規則（人力允許時盡量遵守）──</div>
+                  <div>• 固定班（固定 D / E / N）：整週期以同一班種為主，人力缺口才少數換班</div>
+                  <div>• 輪班類：盡量順班，同種班連排後再換下一種班</div>
+                  <div>• 各護理師班次數接近設定比例（允許 ±2 天偏差）</div>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -2322,10 +2363,10 @@ export default function AdminPage() {
             Tab: 班別設定
         ══════════════════════════════════ */}
         {tab === "shifts_cfg" && (() => {
-          const shiftRow = (s: ShiftDef, i: number, type: "work"|"off") => (
+          const shiftRow = (s: ShiftDef, i: number, type: "work"|"rest"|"off") => (
             <div
               key={i}
-              ref={el => { (type==="work" ? shiftWorkRefs : shiftOffRefs).current[i] = el; }}
+              ref={el => { (type==="work" ? shiftWorkRefs : type==="rest" ? shiftRestRefs : shiftOffRefs).current[i] = el; }}
               className="shift-edit-row"
               style={{ borderBottom:"1px solid #f3f4f6", paddingBottom:8, marginBottom:8 }}
             >
@@ -2333,8 +2374,8 @@ export default function AdminPage() {
                 <span
                   className="drag-handle"
                   style={{ color: shiftDragEnabled ? "#9ca3af" : "#e5e7eb", cursor: shiftDragEnabled ? "grab" : "default" }}
-                  onTouchStart={shiftDragEnabled ? e => { e.preventDefault(); handleShiftDragStart(e.touches[0].clientY, type, i); } : undefined}
-                  onMouseDown={shiftDragEnabled ? e => { e.preventDefault(); handleShiftDragStart(e.clientY, type, i); } : undefined}
+                  onTouchStart={shiftDragEnabled ? e => { e.preventDefault(); handleShiftDragStart(e.touches[0].clientY, type as "work"|"rest"|"off", i); } : undefined}
+                  onMouseDown={shiftDragEnabled ? e => { e.preventDefault(); handleShiftDragStart(e.clientY, type as "work"|"rest"|"off", i); } : undefined}
                 >☰</span>
                 {/* 代碼 */}
                 <div style={{ flex:"0 0 80px" }}>
@@ -2380,7 +2421,9 @@ export default function AdminPage() {
             {/* 說明 */}
             <div style={{ padding:"12px 16px", background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, fontSize:13, color:"#92400e", lineHeight:1.8 }}>
               <b>班別設定說明：</b><br />
-              • 黑色字 = 上班班別（計入上班天數）　紅色字 = 放假/調整班別<br />
+              • <b>上班類</b>（黑色）：計入上班天數，影響臨床人力計算<br />
+              • <b>應休班別</b>（紅色）：OFF 一般休假、半 半職，計入應休天數名額<br />
+              • <b>放假 / 調整類</b>（紅色）：特休、員旅、喪假等，不佔應休名額，最高優先鎖定<br />
               • 勾選「僅管理員」後，護理師填寫頁面不會顯示該班別<br />
               • 儲存後立即套用，建議先設定好再開放護理師填表
             </div>
@@ -2409,18 +2452,33 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* 放假類 */}
+            {/* 應休班別 */}
+            <div className="card">
+              <div className="card-head">
+                <div>
+                  <div style={{ fontSize:15, fontWeight:700 }}>應休班別</div>
+                  <div style={{ fontSize:12, color:"#9ca3af" }}>顯示為紅色字・計入應休天數名額</div>
+                </div>
+                <button className="btn btn-outline btn-sm" onClick={() => addShift("rest")}>＋ 新增班別</button>
+              </div>
+              <div className="card-body">
+                {editRestShifts.map((s, i) => shiftRow(s, i, "rest"))}
+                {!editRestShifts.length && <div style={{ color:"#9ca3af", fontSize:13, textAlign:"center", padding:16 }}>尚未設定應休班別</div>}
+              </div>
+            </div>
+
+            {/* 放假/調整類 */}
             <div className="card">
               <div className="card-head">
                 <div>
                   <div style={{ fontSize:15, fontWeight:700 }}>放假 / 調整類班別</div>
-                  <div style={{ fontSize:12, color:"#9ca3af" }}>顯示為紅色字</div>
+                  <div style={{ fontSize:12, color:"#9ca3af" }}>顯示為紅色字・不佔應休名額・最高優先鎖定</div>
                 </div>
                 <button className="btn btn-outline btn-sm" onClick={() => addShift("off")}>＋ 新增班別</button>
               </div>
               <div className="card-body">
                 {editOffShifts.map((s, i) => shiftRow(s, i, "off"))}
-                {!editOffShifts.length && <div style={{ color:"#9ca3af", fontSize:13, textAlign:"center", padding:16 }}>尚未設定放假類班別</div>}
+                {!editOffShifts.length && <div style={{ color:"#9ca3af", fontSize:13, textAlign:"center", padding:16 }}>尚未設定放假 / 調整類班別</div>}
               </div>
             </div>
 
@@ -2486,10 +2544,23 @@ export default function AdminPage() {
                       {cycleIsSet && (
                         <div>排班週期：<b>{cycle.start_date}</b> ～ <b>{cycle.end_date}</b>（共 {cycle.period_days} 天）</div>
                       )}
+                      <div style={{ marginTop:4, fontWeight:700, color:"#6b7280", fontSize:12 }}>── 硬規則（一定遵守）──</div>
+                      <div>每班每日人數：D = <b>{rulesForm.daily_d}</b>、E = <b>{rulesForm.daily_e}</b>、N = <b>{rulesForm.daily_n}</b> 人（剛好符合）</div>
+                      <div>反向班禁止：<b>{rulesForm.no_reverse_shift ? "✓ 啟用" : "停用"}</b>（E→D 需隔 1 休；N→E/D 需隔 1~2 休）</div>
+                      <div>每週至少 <b>{rulesForm.one_in_seven ? "2" : "1"}</b> 天休假{rulesForm.one_in_seven ? "（一例一休）" : ""}</div>
+                      <div>每週 D/E/N 至多兩種班別：<b>{rulesForm.weekly_max_two_shifts ? "✓ 啟用" : "停用"}</b></div>
                       <div>連續上班上限：<b>{rulesForm.max_consecutive_work}</b> 天</div>
-                      <div>每日最低人數：D <b>{rulesForm.daily_d}</b>、E <b>{rulesForm.daily_e}</b>、N <b>{rulesForm.daily_n}</b> 人</div>
-                      <div>反向班禁止：<b>{rulesForm.no_reverse_shift ? "✓ 啟用（硬規則）" : "停用"}</b></div>
                       <div>全職應休：<b>{fullTimeOff}</b> 天｜半職應休：<b>{partTimeOff}</b> 天</div>
+                      <div>放假/調整類（V 特休、員旅、喪假、延休、補休、調移）：最高優先，不佔應休名額</div>
+                      <div style={{ marginTop:4, fontWeight:700, color:"#6b7280", fontSize:12 }}>── 休假規則 ──</div>
+                      <div>指定休不可覆蓋：<b>{rulesForm.lock_designated_off ? "✓ 啟用" : "停用"}</b></div>
+                      <div>第一天鎖定：<b>{rulesForm.lock_first_day ? "✓ 啟用" : "停用"}</b></div>
+                      <div>首個週末連休限制：<b>{rulesForm.restrict_first_weekend ? "✓ 啟用" : "停用"}</b></div>
+                      <div>自動休連續上限：<b>{rulesForm.weekly_max_off_auto}</b> 天（禁止超過 {rulesForm.weekly_max_off_auto} 天連休）</div>
+                      <div>每週應休總上限：<b>{rulesForm.weekly_max_off_total}</b> 天（= 指定休 + 自動休 ≤ {rulesForm.weekly_max_off_total}）</div>
+                      <div style={{ marginTop:4, fontWeight:700, color:"#6b7280", fontSize:12 }}>── 軟規則（盡量遵守）──</div>
+                      <div>固定班（固定D/E/N）：整週期幾乎全排同一班種，人力不足才允許少數換班</div>
+                      <div>輪班類：盡量順班，同種班連排後再換下一種{rulesForm.prefer_smooth ? "（✓ 啟用）" : "（停用）"}</div>
                     </div>
                   </div>
 
@@ -2499,7 +2570,7 @@ export default function AdminPage() {
                     <label className="fcheck">
                       <input type="checkbox" checked={overwriteConfirmed}
                         onChange={e => setOverwriteConfirmed(e.target.checked)} />
-                      <span style={{ fontSize:13 }}>覆蓋已確認送出的班別（預設不覆蓋）</span>
+                      <span style={{ fontSize:13 }}>覆蓋已確認送出的班別</span>
                     </label>
                     <div style={{ fontSize:12, color:"#9ca3af", marginTop:4 }}>
                       勾選後，已確認班也會被新生成的排班覆蓋；未勾選則只填入空白格子。
@@ -2618,7 +2689,7 @@ export default function AdminPage() {
                         <td style={{ ...tdC, fontSize:12, color:"#374151" }}>{logDate}</td>
                         <td style={{ ...tdC }}>
                           {log.shift
-                            ? <span style={{ fontWeight:700, fontSize:12, color: isOff(log.shift, offShifts)?"#dc2626":"#111827" }}>{log.shift}</span>
+                            ? <span style={{ fontWeight:700, fontSize:12, color: isOff(log.shift, allOffShifts)?"#dc2626":"#111827" }}>{log.shift}</span>
                             : <span style={{ color:"#d1d5db" }}>─</span>}
                         </td>
                       </tr>
@@ -2642,7 +2713,7 @@ export default function AdminPage() {
           nurseName={popup.nurseName}
           current={schedule.find(r=>r.nurse_uid===popup.nurseUid&&r.date===popup.date)?.shift ?? ""}
           workShifts={workShifts}
-          offShifts={offShifts}
+          offShifts={allOffShifts}
           onSelect={async (shift) => {
             // 先讀取再關閉，避免 popup 被清空後取不到值
             const nurseUid = popup!.nurseUid;
@@ -2814,7 +2885,7 @@ export default function AdminPage() {
           nurseName={batchPopup.nurseName}
           dates={batchPopup.dates}
           workShifts={workShifts}
-          offShifts={offShifts}
+          offShifts={allOffShifts}
           onSelect={async (shift) => {
             const updates = batchPopup.dates.map(d => ({ nurse_uid: batchPopup.nurseUid, date: d, shift }));
             setBatchPopup(null);
@@ -2832,7 +2903,7 @@ export default function AdminPage() {
           nurseName={swipePopup.nurseName}
           dates={swipePopup.dates}
           workShifts={workShifts}
-          offShifts={offShifts}
+          offShifts={allOffShifts}
           onSelect={async (shift) => {
             const updates = swipePopup.dates.map(d => ({ nurse_uid: swipePopup.nurseUid, date: d, shift }));
             setSwipePopup(null);

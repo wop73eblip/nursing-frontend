@@ -42,6 +42,8 @@ function attrShort(attr: string): string {
   if (!attr) return "";
   if (attr.startsWith("固定")) return attr.slice(2);
   if (attr.startsWith("輪班")) return attr.slice(2);
+  const m = attr.match(/([DENden]+)$/);
+  if (m) return m[1].toUpperCase();
   return attr;
 }
 

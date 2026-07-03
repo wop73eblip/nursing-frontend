@@ -1651,31 +1651,36 @@ export default function AdminPage() {
                     );
                   })();
 
+                  const btnSm: React.CSSProperties = {
+                    flexShrink: 0, background: "none", border: "1px solid #d1d5db",
+                    borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 14,
+                  };
+
                   return (
                     <div
                       key={u.uid}
                       ref={el => { userItemRefs.current[i] = el; }}
                       style={{
                         borderBottom: "1px solid #f3f4f6",
-                        padding: "10px 14px 10px 32px",
+                        padding: "10px 14px",
                         background: isDirty ? "#fffbeb" : undefined,
                         position: "relative",
                       }}
                     >
-                      {/* ☰ 絕對定位在卡片左側中央 */}
+                      {/* ☰ 絕對定位，往左突出，不佔內容空間 */}
                       <span
                         className="drag-handle"
                         style={{
-                          position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)",
+                          position: "absolute", left: -4, top: "50%", transform: "translateY(-50%)",
                           color: userDragEnabled ? "#9ca3af" : "#e5e7eb",
                           cursor: userDragEnabled ? "grab" : "default",
-                          fontSize: 16, userSelect: "none", lineHeight: 1,
+                          fontSize: 15, userSelect: "none", lineHeight: 1,
                         }}
                         onTouchStart={userDragEnabled ? e => { e.preventDefault(); handleUserDragStart(e.touches[0].clientY, i); } : undefined}
                         onMouseDown={userDragEnabled ? e => { e.preventDefault(); handleUserDragStart(e.clientY, i); } : undefined}
                       >☰</span>
 
-                      {/* ── 行 1：姓名 帳號 角色 🔑 🗑 */}
+                      {/* ── 行 1：姓名 ｜ 帳號 ｜ 角色 */}
                       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
                         <span style={{ fontWeight:600, fontSize:14, flexShrink:0 }}>{u.name}</span>
                         <code style={{ fontSize:11, background:"#f3f4f6", padding:"1px 5px", borderRadius:4, color:"#9ca3af", flexShrink:0 }}>{u.uid}</code>
@@ -1694,16 +1699,9 @@ export default function AdminPage() {
                             color:      u.role==="nurse"?"#0369a1": u.role==="dual"?"#92400e": u.role==="admin"?"#374151":"#7e22ce",
                           }}>{ROLE_ABBR[u.role] ?? u.role}</span>
                         )}
-                        <button style={{ marginLeft:"auto", flexShrink:0, background:"none", border:"1px solid #d1d5db", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:14 }}
-                          title="重設密碼"
-                          onClick={() => { setEditUser(u); setEditForm({ name:u.name, role:u.role, level:u.level, attr:u.attr, halftime:u.halftime, note:u.note, showEditPwd:true }); }}>🔑</button>
-                        {u.uid !== user.uid && (
-                          <button style={{ flexShrink:0, background:"#fef2f2", border:"1px solid #fecaca", borderRadius:6, padding:"3px 8px", cursor:"pointer", fontSize:14, color:"#dc2626" }}
-                            onClick={() => setDeleteTarget(u)}>🗑</button>
-                        )}
                       </div>
 
-                      {/* ── 行 2：層級 輪班 比例 ☐半職 */}
+                      {/* ── 行 2：層級 ｜ 輪班 ｜ 比例 */}
                       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
                         <select value={curLevel} onChange={e => setUserEdit(u.uid, { level: e.target.value })}
                           style={{ ...sel, width: 80 }}>
@@ -1711,7 +1709,6 @@ export default function AdminPage() {
                           <option value="second">second</option>
                           <option value="member">member</option>
                         </select>
-
                         <select value={curAttr} onChange={e => setUserEdit(u.uid, { attr: e.target.value })}
                           style={{ ...sel, width: 80 }}>
                           <option value="固定D">固定D</option>
@@ -1722,34 +1719,31 @@ export default function AdminPage() {
                           <option value="輪班DN">輪班DN</option>
                           <option value="輪班DEN">輪班DEN</option>
                         </select>
-
-                        {/* 比例小字 */}
                         {attrRatioBadge}
+                      </div>
 
-                        {/* ☐ 半職 */}
-                        <label style={{ display:"flex", alignItems:"center", gap:5, fontSize:13, color:"#374151", cursor:"pointer", flexShrink:0, marginLeft:"auto" }}>
+                      {/* ── 行 3：☐ 半職 ｜ 備註（flex-grow） */}
+                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                        <label style={{ display:"flex", alignItems:"center", gap:4, fontSize:13, color:"#374151", cursor:"pointer", flexShrink:0 }}>
                           <input type="checkbox" checked={curHalftime}
                             onChange={e => setUserEdit(u.uid, { halftime: e.target.checked })}
                             style={{ width:15, height:15, cursor:"pointer" }} />
                           半職
                         </label>
+                        <input
+                          value={curNote}
+                          placeholder="備註"
+                          onChange={e => setUserEdit(u.uid, { note: e.target.value })}
+                          style={{
+                            flex: 1, minWidth: 0,
+                            fontSize:13, border:"1px solid #d1d5db", borderRadius:6,
+                            padding:"5px 10px", background:"#f9fafb", fontFamily:"inherit",
+                          }}
+                        />
                       </div>
 
-                      {/* ── 行 3：備註 */}
-                      <input
-                        value={curNote}
-                        placeholder="備註"
-                        onChange={e => setUserEdit(u.uid, { note: e.target.value })}
-                        style={{
-                          width:"100%", boxSizing:"border-box",
-                          fontSize:13, border:"1px solid #d1d5db", borderRadius:6,
-                          padding:"6px 10px", background:"#f9fafb",
-                          fontFamily:"inherit", marginBottom:6,
-                        }}
-                      />
-
-                      {/* ── 底部：儲存按鈕靠右 100px */}
-                      <div style={{ display:"flex", justifyContent:"flex-start" }}>
+                      {/* ── 行 4：儲存（靠左）｜ 🔑 ｜ 🗑（靠右） */}
+                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                         <button
                           disabled={!isDirty || isSavingThis}
                           onClick={() => saveUserCard(u)}
@@ -1760,6 +1754,14 @@ export default function AdminPage() {
                             color: isDirty ? "#fff" : "#9ca3af",
                           }}
                         >{isSavingThis ? "儲存中…" : "儲存"}</button>
+                        <div style={{ marginLeft:"auto", display:"flex", gap:6 }}>
+                          <button style={btnSm} title="重設密碼"
+                            onClick={() => { setEditUser(u); setEditForm({ name:u.name, role:u.role, level:u.level, attr:u.attr, halftime:u.halftime, note:u.note, showEditPwd:true }); }}>🔑</button>
+                          {u.uid !== user.uid && (
+                            <button style={{ ...btnSm, background:"#fef2f2", border:"1px solid #fecaca", color:"#dc2626" }}
+                              onClick={() => setDeleteTarget(u)}>🗑</button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );

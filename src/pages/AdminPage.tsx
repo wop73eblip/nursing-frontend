@@ -2142,12 +2142,14 @@ export default function AdminPage() {
                     <div>
                       <label className="flabel">輪班DEN（D：E：N）</label>
                       <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                        {(["den_d","den_e","den_n"] as const).map((k,i) => (<>
-                          {i > 0 && <span key={`sep${i}`} style={{ color:"#9ca3af" }}>：</span>}
-                          <NumInput key={k} min={1} max={99} value={ratioForm[k]}
-                            onChange={n => setRatioForm(p=>({...p,[k]:n}))}
-                            style={{ width:54, border:"1px solid #e5e7eb", borderRadius:7, padding:"5px 8px", fontFamily:"inherit", fontSize:13 }} />
-                        </>))}
+                        {(["den_d","den_e","den_n"] as const).map((k,i) => (
+                          <React.Fragment key={k}>
+                            {i > 0 && <span style={{ color:"#9ca3af" }}>：</span>}
+                            <NumInput min={1} max={99} value={ratioForm[k]}
+                              onChange={n => setRatioForm(p=>({...p,[k]:n}))}
+                              style={{ width:54, border:"1px solid #e5e7eb", borderRadius:7, padding:"5px 8px", fontFamily:"inherit", fontSize:13 }} />
+                          </React.Fragment>
+                        ))}
                       </div>
                     </div>
                   </div>

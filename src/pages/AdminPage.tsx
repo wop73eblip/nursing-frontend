@@ -355,6 +355,15 @@ export default function AdminPage() {
   const [toast, setToast] = useState({ msg:"", ok:true });
   const toastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Generate tab state（必須在頂層，不可放 IIFE 內）
+  const [generating, setGenerating] = useState(false);
+  const [genResult, setGenResult] = useState<string>("");
+  const [genWarnings, setGenWarnings] = useState<string[]>([]);
+  const [genAnomalies, setGenAnomalies] = useState<string[]>([]);
+  const [overwriteConfirmed, setOverwriteConfirmed] = useState(false);
+  const [confirmGenerate, setConfirmGenerate] = useState(false);
+  const [hasGenerated, setHasGenerated] = useState(false);
+
   const year = parseInt(ym.slice(0,4));
   const month = parseInt(ym.slice(5,7));
 
@@ -2509,13 +2518,6 @@ export default function AdminPage() {
             Tab: 一鍵生成
         ══════════════════════════════════ */}
         {tab === "generate" && (() => {
-          const [generating, setGenerating] = useState(false);
-          const [genResult, setGenResult] = useState<string>("");
-          const [genWarnings, setGenWarnings] = useState<string[]>([]);
-          const [genAnomalies, setGenAnomalies] = useState<string[]>([]);
-          const [overwriteConfirmed, setOverwriteConfirmed] = useState(false);
-          const [confirmGenerate, setConfirmGenerate] = useState(false);
-          const [hasGenerated, setHasGenerated] = useState(false);
 
           const unconfirmedCount = schedule.filter(r => cycleDays.includes(r.date) && !r.confirmed && r.shift).length;
           const confirmedCount   = schedule.filter(r => cycleDays.includes(r.date) && r.confirmed).length;

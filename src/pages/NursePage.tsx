@@ -206,7 +206,7 @@ function Dialog({
 
 // ─── 主頁面
 type Entry = { shift: string; confirmed: boolean };
-type NurseInfo = { uid: string; name: string; attr: string; level: string; role: string };
+type NurseInfo = { uid: string; name: string; attr: string; level: string; role: string; sort_order: number };
 
 export default function NursePage() {
   const nav  = useNavigate();
@@ -361,11 +361,7 @@ export default function NursePage() {
 
       const nurseList: NurseInfo[] = (usersRes.data.users ?? [])
         .filter((u: any) => ["nurse", "dual"].includes(u.role))
-        .sort((a: any, b: any) => {
-          const lvl = { leader: 0, second: 1, member: 2 };
-          return (lvl[a.level as keyof typeof lvl] ?? 9) - (lvl[b.level as keyof typeof lvl] ?? 9)
-            || a.name.localeCompare(b.name);
-        });
+        .sort((a: any, b: any) => (a.sort_order ?? 999) - (b.sort_order ?? 999));
       setNurses(nurseList);
 
       // 個人設定
@@ -901,6 +897,7 @@ export default function NursePage() {
                         const finalCls = `${cls}${!isMe ? " readonly" : ""}`;
 
                         const title = !isMe ? undefined
+                          : isDay1Locked ? "第一天已鎖定，無法修改"
                           : mismatch ? `⚠ 與輪班屬性「${myAttr}」不符，點擊可修改`
                           : confirmed ? "已確認送出，點擊可申請修改"
                           : shift ? "已填入（待確認），點擊修改"
@@ -917,9 +914,9 @@ export default function NursePage() {
                             <span
                               className={finalCls + swipeCls + ctrlShiftCls}
                               style={style}
-                              data-date={isMe ? d : undefined}
-                              data-ni={isMe ? String(ni) : undefined}
-                              onClick={isMe && !isSuperAdmin ? (e) => {
+                              data-date={isMe && !isDay1Locked ? d : undefined}
+                              data-ni={isMe && !isDay1Locked ? String(ni) : undefined}
+                              onClick={isMe && !isSuperAdmin && !isDay1Locked ? (e) => {
                                 if (e.ctrlKey || e.metaKey) {
                                   e.preventDefault();
                                   setCtrlSelected(prev => {
@@ -950,7 +947,7 @@ export default function NursePage() {
                                 setShiftAnchor({ date: d, shift: mySchedule[d]?.shift ?? "" });
                                 openCell(d);
                               } : undefined}
-                              onTouchStart={isMe && !isSuperAdmin ? (e) => handleCellTouchStart(e, d, ni) : undefined}
+                              onTouchStart={isMe && !isSuperAdmin && !isDay1Locked ? (e) => handleCellTouchStart(e, d, ni) : undefined}
                               title={title}
                             >
                               {shift ?? (isMe ? "+" : "")}

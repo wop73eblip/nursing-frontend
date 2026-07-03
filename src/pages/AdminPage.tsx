@@ -307,6 +307,12 @@ export default function AdminPage() {
     lock_first_day: true,      // 第一天鎖定
     no_reverse_shift: true,    // 反向班禁止（硬規則）
     prefer_smooth: true,       // 盡量順班（軟規則）
+    // ── 休假規則（新增）
+    restrict_first_weekend: true,  // 規則5：首個週末不同時休
+    weekly_max_off_auto: 2,        // 規則6：自動休每週上限
+    weekly_max_off_total: 3,       // 規則7：含指定休每週上限
+    one_in_seven: false,           // 規則8：一例一休（每週≥2天休）
+    lock_designated_off: false,    // 規則10：指定休不可覆蓋
     notes: "",
   });
 
@@ -2095,6 +2101,58 @@ export default function AdminPage() {
                         <div>
                           <b>盡量順班（軟規則）</b><br />
                           <span style={{ fontSize:12, color:"#6b7280" }}>以最少換班次數排班：同種班別排成連續區塊（含穿插休假），排完再換下一種班。輪班 DE 例：先把 D 全排完，再排 E，而非 DDEEDDEE 交替。</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="setting-section">
+                    <div className="setting-title">🌴 休假規則</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+
+                      {/* 規則5：首個週末 */}
+                      <label className="fcheck">
+                        <input type="checkbox" checked={rulesForm.restrict_first_weekend}
+                          onChange={e => setRulesForm(p=>({...p,restrict_first_weekend:e.target.checked}))} />
+                        <div>
+                          <span style={{ fontSize:13 }}>限制週期首個週末連休</span><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>排班週期第一個週六和週日不可同時為休假（預設啟用）</span>
+                        </div>
+                      </label>
+
+                      {/* 規則8：一例一休 */}
+                      <label className="fcheck">
+                        <input type="checkbox" checked={rulesForm.one_in_seven}
+                          onChange={e => setRulesForm(p=>({...p,one_in_seven:e.target.checked}))} />
+                        <div>
+                          <span style={{ fontSize:13 }}>一例一休（每週至少 2 天休假）</span><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>每週一到週日至少安排 2 天休假（預設關閉）</span>
+                        </div>
+                      </label>
+
+                      {/* 規則10：指定休不可覆蓋 */}
+                      <label className="fcheck">
+                        <input type="checkbox" checked={rulesForm.lock_designated_off}
+                          onChange={e => setRulesForm(p=>({...p,lock_designated_off:e.target.checked}))} />
+                        <div>
+                          <span style={{ fontSize:13 }}>指定休不可被覆蓋</span><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>啟用時：人力不足則擋住生成並警告。停用時：指定休可被覆蓋，系統自動補休（預設關閉）</span>
+                        </div>
+                      </label>
+
+                      {/* 規則6/7：每週休假上限 */}
+                      <div style={{ display:"flex", gap:20, marginTop:4 }}>
+                        <div>
+                          <label className="flabel">自動休每週上限（天）</label>
+                          <NumInput className="finput" min={1} max={7} value={rulesForm.weekly_max_off_auto}
+                            onChange={n => setRulesForm(p=>({...p,weekly_max_off_auto:n}))} />
+                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>系統自動安排的休假（預設 2 天）</div>
+                        </div>
+                        <div>
+                          <label className="flabel">含指定休每週上限（天）</label>
+                          <NumInput className="finput" min={1} max={7} value={rulesForm.weekly_max_off_total}
+                            onChange={n => setRulesForm(p=>({...p,weekly_max_off_total:n}))} />
+                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>含指定休的總休假上限（預設 3 天）</div>
                         </div>
                       </div>
                     </div>

@@ -38,6 +38,12 @@ interface User {
 interface ShiftRow { nurse_uid: string; date: string; shift: string; confirmed?: boolean; }
 
 function isOff(code: string, offShifts: ShiftDef[]) { return offShifts.some(s => s.code === code); }
+function attrShort(attr: string): string {
+  if (!attr) return "";
+  if (attr.startsWith("固定")) return attr.slice(2);
+  if (attr.startsWith("輪班")) return attr.slice(2);
+  return attr;
+}
 
 // Number input that allows backspace without jumping to 0
 function NumInput({ value, min, max, onChange, className, style }: {
@@ -1494,8 +1500,8 @@ export default function AdminPage() {
                   {nurseUsers.map(u => (
                     <tr key={u.uid}>
                       <td className="sticky-name" style={{ padding:"6px 10px", fontSize:13, fontWeight:600 }}>
-                        <div>{u.name}</div>
-                        <div style={{ fontSize:10, color:"#9ca3af", fontWeight:400 }}>{u.attr}</div>
+                        {u.name}
+                        {u.attr && <span style={{ fontSize:10, color:"#9ca3af", fontWeight:400, marginLeft:3 }}>{attrShort(u.attr)}</span>}
                       </td>
                       {allDays.map(d => {
                         const isRef = refDays.includes(d);

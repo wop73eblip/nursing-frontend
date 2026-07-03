@@ -10,6 +10,12 @@ const DOW_ZH       = ["日","一","二","三","四","五","六"];
 
 function isOffFn(s: string, offShifts: string[]) { return offShifts.includes(s); }
 function shiftColor(s: string, offShifts: string[]) { return isOffFn(s, offShifts) ? "#dc2626" : "#111827"; }
+function attrShort(attr: string): string {
+  if (!attr) return "";
+  if (attr.startsWith("固定")) return attr.slice(2);
+  if (attr.startsWith("輪班")) return attr.slice(2);
+  return attr;
+}
 
 function attrMismatchMsg(shift: string, attr: string, offCodes: string[]): string | null {
   if (!shift || !attr) return null;
@@ -876,8 +882,8 @@ export default function NursePage() {
                   return (
                     <tr key={n.uid}>
                       <td className={`td-name${isMe ? " is-me" : ""}`}>
-                        <div>{n.name}{isMe ? " ★" : ""}</div>
-                        {n.attr && <div style={{ fontSize: 9, color: isMe ? "#93c5fd" : "#9ca3af", fontWeight: 400, marginTop: 1 }}>{n.attr}</div>}
+                        {n.name}{isMe ? " ★" : ""}
+                        {n.attr && <span style={{ fontSize: 9, color: isMe ? "#93c5fd" : "#9ca3af", fontWeight: 400, marginLeft: 3 }}>{attrShort(n.attr)}</span>}
                       </td>
                       {days.map(d => {
                         const entry     = nSched[d];

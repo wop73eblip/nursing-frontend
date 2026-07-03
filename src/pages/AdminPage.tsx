@@ -1500,7 +1500,9 @@ export default function AdminPage() {
                           + (isSwipeSel  ? " is-swipe-sel"  : "")
                           + (isAnchor    ? " is-anchor"     : "");
                         const refStyle: React.CSSProperties = isRef
-                          ? { opacity: row?.shift ? 0.55 : 0.35, background: row?.shift ? undefined : "#f3f4f6" }
+                          ? row?.shift
+                            ? { color: "#000000", fontWeight: 600, opacity: 1 }
+                            : { color: "#666666", background: "#f3f4f6", opacity: 1 }
                           : {};
 
                         function handleClick(e: React.MouseEvent) {

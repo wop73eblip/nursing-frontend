@@ -2114,6 +2114,83 @@ export default function AdminPage() {
               </div>
             </div>
 
+            {/* ── 規則說明卡片 */}
+            <div className="card">
+              <div className="card-head"><div style={{ fontSize:16, fontWeight:700 }}>排班規則說明</div></div>
+              <div className="card-body">
+                <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+
+                  {/* 1. 硬規則 */}
+                  <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"12px 16px" }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#1e293b", marginBottom:8 }}>🔒 硬規則（不可違反）</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                      {[
+                        "每班（D／E／N）至少需要 1 位 leader，加上另 1 位 leader 或 second（不可為同一人）；條件無法達成時擋住生成並警告",
+                        "反向班禁止：E→D 插 1 天休假、N→E 插 1 天休假、N→D 插 2 天休假",
+                        "每週至少一天休假",
+                        "每週 D/E/N 至多兩種班別（每人每週至多出現兩種班別）",
+                      ].map((t, i) => (
+                        <div key={i} style={{ display:"flex", gap:7, fontSize:12, color:"#374151", lineHeight:1.6 }}>
+                          <span style={{ flexShrink:0, color:"#64748b" }}>•</span><span>{t}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 2. 休假設定 */}
+                  <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"12px 16px" }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#1e293b", marginBottom:8 }}>🌴 休假設定說明</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                      {[
+                        "限制週期首個週末連休（預設啟用）：第一個週六＋週日不可同時填 OFF，避免連續上班超過上限",
+                        "一般自動休最多 2 天（系統自動安排，非指定休）",
+                        "含指定休最多 3 天（指定休 1 天＋自動休最多 2 天）",
+                        "一例一休：每週（週一到週日）至少 2 天放假（可勾選啟用）",
+                        "特休不列入一般休假計算，特休天數獨立計算，不佔應休天數名額",
+                        "特休／員工旅遊假鎖定為最高順位，生成班表時一定保留，不會被覆蓋",
+                        "指定休不可被覆蓋（可勾選）：啟用時人力不足擋住生成並警告；未啟用時可被覆蓋，系統自動補休並提示管理員",
+                        "所有休假設定自動儲存，下次登入自動帶入",
+                      ].map((t, i) => (
+                        <div key={i} style={{ display:"flex", gap:7, fontSize:12, color:"#374151", lineHeight:1.6 }}>
+                          <span style={{ flexShrink:0, color:"#64748b" }}>•</span><span>{t}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 3. 班別特殊規則 */}
+                  <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"12px 16px" }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#1e293b", marginBottom:8 }}>⚙️ 班別特殊規則</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                      {[
+                        "行政班／開會／公假／書記：不計入當天 D／E／N 臨床人力，但算上班日、連續上班天數照算、班別視同 D",
+                        "半職視同休假：排班時視為休假計算，匯出時自動轉換顯示為「休假」",
+                      ].map((t, i) => (
+                        <div key={i} style={{ display:"flex", gap:7, fontSize:12, color:"#374151", lineHeight:1.6 }}>
+                          <span style={{ flexShrink:0, color:"#64748b" }}>•</span><span>{t}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 4. 順班規則（軟性） */}
+                  <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"12px 16px" }}>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#1e293b", marginBottom:8 }}>🔄 順班規則（軟性）</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                      {[
+                        "固定D／E／N：整個週期幾乎全排同一種班，真的萬不得已（人力缺口無法填補）才允許少數幾天改排其他班，且仍須符合反向班等硬規則",
+                      ].map((t, i) => (
+                        <div key={i} style={{ display:"flex", gap:7, fontSize:12, color:"#374151", lineHeight:1.6 }}>
+                          <span style={{ flexShrink:0, color:"#64748b" }}>•</span><span>{t}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+
             {/* 輪班比例設定 */}
             <div className="card">
               <div className="card-head"><div style={{ fontSize:15, fontWeight:700 }}>輪班比例設定</div></div>

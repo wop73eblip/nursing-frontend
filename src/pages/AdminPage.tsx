@@ -1499,11 +1499,12 @@ export default function AdminPage() {
                           + (isDragFill  ? " is-drag-fill"  : "")
                           + (isSwipeSel  ? " is-swipe-sel"  : "")
                           + (isAnchor    ? " is-anchor"     : "");
-                        const refStyle: React.CSSProperties = isRef
+                        // isRef 時完整覆蓋 style，避免綠色底色/外框
+                        const cellFinalStyle: React.CSSProperties = isRef
                           ? row?.shift
-                            ? { color: "#000000", fontWeight: 600, opacity: 1 }
-                            : { color: "#666666", background: "#f3f4f6", opacity: 1 }
-                          : {};
+                            ? { background: "transparent", border: "1.5px solid transparent", color: "#000000", fontWeight: 700 }
+                            : { background: "transparent", border: "1.5px solid transparent", color: "#555555" }
+                          : style;
 
                         function handleClick(e: React.MouseEvent) {
                           // Ctrl / Meta：切換選取（放開 Ctrl 才跳 popup）
@@ -1550,7 +1551,7 @@ export default function AdminPage() {
                           <td key={d} className="ap-td-shift" style={{ background: isRef ? "#fafafa" : undefined }}>
                             <span
                               className={cls}
-                              style={{ ...style, ...refStyle }}
+                              style={cellFinalStyle}
                               data-nurse-uid={u.uid}
                               data-date={d}
                               data-shift={row?.shift ?? ""}

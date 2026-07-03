@@ -35,7 +35,7 @@ interface User {
   uid: string; name: string; role: string; level: string;
   attr: string; halftime: boolean; note: string; sort_order: number;
 }
-interface ShiftRow { nurse_uid: string; date: string; shift: string; confirmed?: boolean; }
+interface ShiftRow { nurse_uid: string; date: string; shift: string; confirmed?: boolean; updated_by?: string; }
 
 function isOff(code: string, offShifts: ShiftDef[]) { return offShifts.some(s => s.code === code); }
 function attrShort(attr: string): string {
@@ -713,7 +713,7 @@ export default function AdminPage() {
     const prev = schedule.find(r => r.nurse_uid===nurse_uid && r.date===date)?.shift ?? null;
     setSchedule(cur => {
       const f = cur.filter(r => !(r.nurse_uid===nurse_uid && r.date===date));
-      if (shift) f.push({ nurse_uid, date, shift, confirmed: false });
+      if (shift) f.push({ nurse_uid, date, shift, confirmed: false, updated_by: user.uid });
       return f;
     });
     setSaving(s => new Set(s).add(key));
@@ -749,7 +749,7 @@ export default function AdminPage() {
       let next = [...prev];
       for (const u of deduped) {
         next = next.filter(r => !(r.nurse_uid===u.nurse_uid && r.date===u.date));
-        if (u.shift) next.push({ nurse_uid: u.nurse_uid, date: u.date, shift: u.shift, confirmed: false });
+        if (u.shift) next.push({ nurse_uid: u.nurse_uid, date: u.date, shift: u.shift, confirmed: false, updated_by: user.uid });
       }
       return next;
     });
@@ -1177,14 +1177,24 @@ export default function AdminPage() {
     else setEditOffShifts(p => p.map((s,i) => i===idx ? {...s,[field]:val} : s));
   }
 
-  // ── 格子樣式
-  function cellStyle(shift: string|undefined, confirmed: boolean|undefined, saving: boolean): { cls: string; style: React.CSSProperties } {
+  // ── 格子樣式（nurseUid: 判斷 updated_by 是否為本人 → 綠色；否則 → 藍色）
+  function cellStyle(shift: string|undefined, confirmed: boolean|undefined, saving: boolean, nurseUid?: string, updatedBy?: string): { cls: string; style: React.CSSProperties } {
     let cls = "ap-cell";
     let style: React.CSSProperties = {};
     if (saving) { cls += " is-saving"; }
     else if (!shift) { cls += " is-empty"; }
-    else if (confirmed) { style = { background:"#1e40af", borderColor:"#1e3a8a", color:"#fff" }; }
-    else { style = { background:"#dbeafe", borderColor:"#3b82f6", color: shiftColor(shift, allOffShifts) }; }
+    else {
+      const isNurseFilled = !!updatedBy && !!nurseUid && updatedBy === nurseUid;
+      if (isNurseFilled) {
+        style = confirmed
+          ? { background:"#166534", borderColor:"#14532d", color:"#fff" }
+          : { background:"#dcfce7", borderColor:"#16a34a", color: shiftColor(shift, allOffShifts) };
+      } else {
+        style = confirmed
+          ? { background:"#1e40af", borderColor:"#1e3a8a", color:"#fff" }
+          : { background:"#dbeafe", borderColor:"#3b82f6", color: shiftColor(shift, allOffShifts) };
+      }
+    }
     return { cls, style };
   }
 
@@ -1515,7 +1525,7 @@ export default function AdminPage() {
                         const isDragFill  = dragFill?.nurseUid === u.uid && dragFill.dates.has(d);
                         const isSwipeSel  = swipeDates.has(d) && (swipeRef.current?.nurseUid === u.uid || swipePopup?.nurseUid === u.uid);
                         const isAnchor    = shiftAnchor?.nurseUid === u.uid && shiftAnchor.date === d && !shiftRange.size && !ctrlSelected.size;
-                        const { cls: baseCls, style } = cellStyle(row?.shift, row?.confirmed, saving.has(key));
+                        const { cls: baseCls, style } = cellStyle(row?.shift, row?.confirmed, saving.has(key), u.uid, row?.updated_by);
                         const cls = baseCls
                           + (isCtrlSel   ? " is-ctrl-sel"   : "")
                           + (isShiftSel  ? " is-shift-sel"  : "")

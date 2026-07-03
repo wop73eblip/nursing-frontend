@@ -38,6 +38,7 @@ function cellStyleFor(
   isSaving: boolean,
   mismatch: boolean,
   offShifts: string[],
+  isAdminFilled = false,
 ): { cls: string; style: React.CSSProperties } {
   let cls = "cell-span";
   let style: React.CSSProperties = {};
@@ -47,10 +48,16 @@ function cellStyleFor(
     cls += " is-empty";
   } else if (mismatch) {
     style = { background: "#fef9c3", borderColor: "#eab308", color: shiftColor(shift, offShifts) };
-  } else if (confirmed) {
-    style = { background: "#166534", borderColor: "#14532d", color: "#fff" };
+  } else if (isAdminFilled) {
+    // 管理員填入：藍色系
+    style = confirmed
+      ? { background: "#1e40af", borderColor: "#1e3a8a", color: "#fff" }
+      : { background: "#dbeafe", borderColor: "#3b82f6", color: shiftColor(shift, offShifts) };
   } else {
-    style = { background: "#dcfce7", borderColor: "#16a34a", color: shiftColor(shift, offShifts) };
+    // 護理師填入：綠色系
+    style = confirmed
+      ? { background: "#166534", borderColor: "#14532d", color: "#fff" }
+      : { background: "#dcfce7", borderColor: "#16a34a", color: shiftColor(shift, offShifts) };
   }
   return { cls, style };
 }
@@ -205,7 +212,7 @@ function Dialog({
 }
 
 // ─── 主頁面
-type Entry = { shift: string; confirmed: boolean };
+type Entry = { shift: string; confirmed: boolean; updated_by?: string };
 type NurseInfo = { uid: string; name: string; attr: string; level: string; role: string; sort_order: number };
 
 export default function NursePage() {
@@ -372,7 +379,7 @@ export default function NursePage() {
       for (const r of (schedRes.data.schedule ?? [])) {
         if (!r.shift) continue;
         if (!sched[r.nurse_uid]) sched[r.nurse_uid] = {};
-        sched[r.nurse_uid][r.date] = { shift: r.shift, confirmed: !!r.confirmed };
+        sched[r.nurse_uid][r.date] = { shift: r.shift, confirmed: !!r.confirmed, updated_by: r.updated_by ?? null };
       }
       setAllSched(sched);
     } catch (e) { console.error("[loadAll]", e); }
@@ -892,8 +899,10 @@ export default function NursePage() {
                         // 屬性不符（只對自己判斷）
                         const mismatch  = isMe ? !!attrMismatchMsg(shift ?? "", myAttr, offShifts) : false;
                         const isDay1Locked = lockFirstDay && cycleRange && d === cycleRange.start;
+                        // 管理員填入：updated_by 不是本人
+                        const isAdminFilled = !!shift && !!entry?.updated_by && entry.updated_by !== n.uid;
 
-                        const { cls, style } = cellStyleFor(shift, confirmed, isSaving, mismatch, offShifts);
+                        const { cls, style } = cellStyleFor(shift, confirmed, isSaving, mismatch, offShifts, isAdminFilled);
                         const finalCls = `${cls}${!isMe ? " readonly" : ""}`;
 
                         const title = !isMe ? undefined

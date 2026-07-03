@@ -244,6 +244,7 @@ export default function AdminPage() {
   const [popup, setPopup] = useState<{ date: string; nurseUid: string; nurseName: string } | null>(null);
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [confirmingAll, setConfirmingAll] = useState(false);
+  const [confirmEdit, setConfirmEdit] = useState<{ nurseUid: string; date: string; nurseName: string } | null>(null);
 
   // 批次填寫
   const [shiftAnchor, setShiftAnchor] = useState<{ nurseUid: string; date: string; shift: string } | null>(null);
@@ -1182,8 +1183,8 @@ export default function AdminPage() {
     let style: React.CSSProperties = {};
     if (saving) { cls += " is-saving"; }
     else if (!shift) { cls += " is-empty"; }
-    else if (confirmed) { style = { background:"#166534", borderColor:"#14532d", color:"#fff" }; }
-    else { style = { background:"#dcfce7", borderColor:"#16a34a", color: shiftColor(shift, allOffShifts) }; }
+    else if (confirmed) { style = { background:"#1e40af", borderColor:"#1e3a8a", color:"#fff" }; }
+    else { style = { background:"#dbeafe", borderColor:"#3b82f6", color: shiftColor(shift, allOffShifts) }; }
     return { cls, style };
   }
 
@@ -1566,7 +1567,12 @@ export default function AdminPage() {
                           setCtrlSelected(new Set());
                           setShiftRange(new Set());
                           setShiftAnchor({ nurseUid: u.uid, date: d, shift: row?.shift ?? "" });
-                          setPopup({ date: d, nurseUid: u.uid, nurseName: u.name });
+                          // 已確認格子先跳警告
+                          if (row?.confirmed) {
+                            setConfirmEdit({ nurseUid: u.uid, date: d, nurseName: u.name });
+                          } else {
+                            setPopup({ date: d, nurseUid: u.uid, nurseName: u.name });
+                          }
                         }
 
                         return (
@@ -2731,6 +2737,26 @@ export default function AdminPage() {
             await updateShift(nurseUid, date, shift);
           }}
           onClose={() => setPopup(null)}
+        />
+      )}
+
+      {/* ── 修改已確認格子警告 */}
+      {confirmEdit && (
+        <Dialog
+          title="確認修改已送出的班別？"
+          body={<>已確認的班別（{confirmEdit.nurseName}　{confirmEdit.date}）修改後將回到<b>待確認</b>狀態，需重新送出確認。</>}
+          actions={[
+            { label: "取消", onClick: () => setConfirmEdit(null) },
+            {
+              label: "繼續修改",
+              danger: true,
+              onClick: () => {
+                const { nurseUid, date, nurseName } = confirmEdit!;
+                setConfirmEdit(null);
+                setPopup({ date, nurseUid, nurseName });
+              },
+            },
+          ]}
         />
       )}
 

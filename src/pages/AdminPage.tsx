@@ -261,6 +261,9 @@ export default function AdminPage() {
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [confirmEdit, setConfirmEdit] = useState<{ nurseUid: string; date: string; nurseName: string } | null>(null);
+  const [revertConfirm, setRevertConfirm] = useState(false);
+  const [reverting, setReverting] = useState(false);
+  const [revertResult, setRevertResult] = useState<string>("");
 
   // 批次填寫
   const [shiftAnchor, setShiftAnchor] = useState<{ nurseUid: string; date: string; shift: string } | null>(null);
@@ -1483,6 +1486,13 @@ export default function AdminPage() {
                 {!cycleIsSet && (
                   <input type="month" value={ym} onChange={e => setYm(e.target.value)} className="finput" style={{ width:150 }} />
                 )}
+                <button
+                  className="btn btn-gray"
+                  disabled={reverting}
+                  onClick={() => setRevertConfirm(true)}
+                  title="回復到匯入 CP-SAT 之前的預假狀態">
+                  回復到預假狀態
+                </button>
                 <button className="btn btn-green" onClick={confirmAll} disabled={confirmingAll}>
                   {confirmingAll ? "確認中…" : `確認送出（${schedule.filter(r=>!r.confirmed&&r.shift).length} 格待確認）`}
                 </button>
@@ -1497,6 +1507,16 @@ export default function AdminPage() {
                 待確認 {schedule.filter(r=>cycleDays.includes(r.date)&&!r.confirmed&&r.shift).length} 格
               </span>
             </div>
+
+            {/* 回復結果提示 */}
+            {revertResult && (
+              <div style={{
+                margin:"8px 20px 0", padding:"8px 14px", borderRadius:8, fontSize:13, fontWeight:600,
+                background: revertResult.startsWith("✗") ? "#fef2f2" : "#dcfce7",
+                color:      revertResult.startsWith("✗") ? "#dc2626" : "#15803d",
+                border:     `1px solid ${revertResult.startsWith("✗") ? "#fecaca" : "#bbf7d0"}`,
+              }}>{revertResult}</div>
+            )}
 
             {/* 捲動速度選擇器 */}
             <div style={{ display:"flex", alignItems:"center", gap:4, justifyContent:"flex-end", padding:"4px 8px 2px" }}>
@@ -2801,13 +2821,39 @@ export default function AdminPage() {
                       <div style={{ fontSize:12, color:"#166534", marginBottom:12 }}>
                         確認結果無誤後，點擊「匯入到班表」將班表寫入，再進行手動微調。
                       </div>
-                      <button
-                        className="btn btn-primary"
-                        onClick={runCommit}
-                        disabled={committing}
-                        style={{ background:"#16a34a", borderColor:"#15803d" }}>
-                        {committing ? "匯入中…" : "匯入到班表"}
-                      </button>
+                      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                        <button
+                          className="btn btn-primary"
+                          onClick={runCommit}
+                          disabled={committing}
+                          style={{ background:"#16a34a", borderColor:"#15803d" }}>
+                          {committing ? "匯入中…" : "匯入到班表"}
+                        </button>
+                        <button
+                          className="btn btn-gray"
+                          disabled={committing}
+                          onClick={async () => {
+                            const token = getAuth()?.token;
+                            const base = (api.defaults.baseURL ?? "").replace(/\/$/, "");
+                            try {
+                              const res = await fetch(`${base}/export/temp`, {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                                body: JSON.stringify(pendingSchedule),
+                              });
+                              if (!res.ok) { const err = await res.json().catch(() => ({})); alert("匯出失敗：" + (err.detail ?? res.statusText)); return; }
+                              const blob = await res.blob();
+                              const blobUrl = URL.createObjectURL(blob);
+                              const link = document.createElement("a");
+                              link.href = blobUrl;
+                              link.download = `暫時班表_${cycle.start_date}_${cycle.end_date}.xlsx`;
+                              link.click();
+                              URL.revokeObjectURL(blobUrl);
+                            } catch (e: any) { alert("匯出失敗：" + (e.message ?? "網路錯誤")); }
+                          }}>
+                          匯出暫時班表
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -2960,6 +3006,34 @@ export default function AdminPage() {
         )}
 
       </div>
+
+      {/* ── 回復到預假狀態確認 Dialog */}
+      {revertConfirm && (
+        <Dialog
+          title="回復到預假狀態"
+          body={
+            <div style={{ fontSize:13, color:"#374151", lineHeight:1.6 }}>
+              確定要回復到預假狀態嗎？<br />
+              CP-SAT 生成的班別將全部清除，此動作無法復原。
+            </div>
+          }
+          actions={[
+            { label: "取消", onClick: () => setRevertConfirm(false) },
+            { label: reverting ? "回復中…" : "確定回復", danger: true, onClick: async () => {
+              setRevertConfirm(false);
+              setReverting(true);
+              setRevertResult("");
+              try {
+                const { data } = await api.post("/schedule/revert");
+                setRevertResult(data.message ?? "✓ 已回復到預假狀態");
+                fetchSchedule();
+              } catch (err: any) {
+                setRevertResult("✗ " + (err.response?.data?.detail ?? err.message ?? "回復失敗"));
+              } finally { setReverting(false); }
+            }},
+          ]}
+        />
+      )}
 
       {/* ── 班別選擇 Modal */}
       {popup && (

@@ -2539,23 +2539,29 @@ export default function AdminPage() {
             } finally { setGenerating(false); }
           }
 
-          function downloadExport(type: "preview" | "schedule") {
+          async function downloadExport(type: "preview" | "schedule") {
             const token = getAuth()?.token;
-            const a = document.createElement("a");
-            a.href = `${(api.defaults.baseURL ?? "").replace(/\/$/, "")}/export/${type}`;
-            // 用 fetch + blob 下載（帶 Authorization header）
-            fetch(a.href, { headers: { Authorization: `Bearer ${token}` } })
-              .then(r => r.blob())
-              .then(blob => {
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement("a");
-                link.href = url;
-                link.download = type === "preview"
-                  ? `預假狀態_${cycle.start_date}_${cycle.end_date}.xlsx`
-                  : `完整班表_${cycle.start_date}_${cycle.end_date}.xlsx`;
-                link.click();
-                URL.revokeObjectURL(url);
-              });
+            const base = (api.defaults.baseURL ?? "").replace(/\/$/, "");
+            const url  = `${base}/export/${type}`;
+            try {
+              const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+              if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                alert("匯出失敗：" + (err.detail ?? res.statusText));
+                return;
+              }
+              const blob = await res.blob();
+              const blobUrl = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = blobUrl;
+              link.download = type === "preview"
+                ? `預假狀態_${cycle.start_date}_${cycle.end_date}.xlsx`
+                : `完整班表_${cycle.start_date}_${cycle.end_date}.xlsx`;
+              link.click();
+              URL.revokeObjectURL(blobUrl);
+            } catch (e: any) {
+              alert("匯出失敗：" + (e.message ?? "網路錯誤"));
+            }
           }
 
           // 確認清單 item

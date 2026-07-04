@@ -80,10 +80,10 @@ function shiftColor(code: string, offShifts: ShiftDef[]) { return isOff(code, of
 
 // ─── 班別 Modal
 function ShiftModal({
-  date, nurseName, current, workShifts, offShifts, onSelect, onClose,
+  date, nurseName, current, workShifts, restShifts, offShifts, onSelect, onClose,
 }: {
   date: string; nurseName: string; current: string;
-  workShifts: ShiftDef[]; offShifts: ShiftDef[];
+  workShifts: ShiftDef[]; restShifts: ShiftDef[]; offShifts: ShiftDef[];
   onSelect: (s: string | null) => void; onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -113,12 +113,21 @@ function ShiftModal({
               title={s.label}>{s.code}</button>
           ))}
         </div>
-        <div style={{ fontSize:11, fontWeight:700, color:"#dc2626", marginBottom:6 }}>放假 / 調整</div>
-        <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-          {offShifts.map(s => (
+        <div style={{ fontSize:11, fontWeight:700, color:"#dc2626", marginBottom:6 }}>應休</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:12 }}>
+          {restShifts.map(s => (
             <button key={s.code} onClick={() => onSelect(s.code)} style={{ ...btn, color:"#dc2626",
               border: current===s.code ? "2px solid #dc2626" : "1.5px solid #fecaca",
               background: current===s.code ? "#fef2f2" : "#fff5f5" }}
+              title={s.label}>{s.code}</button>
+          ))}
+        </div>
+        <div style={{ fontSize:11, fontWeight:700, color:"#d97706", marginBottom:6 }}>放假 / 調整</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+          {offShifts.map(s => (
+            <button key={s.code} onClick={() => onSelect(s.code)} style={{ ...btn, color:"#d97706",
+              border: current===s.code ? "2px solid #d97706" : "1.5px solid #fde68a",
+              background: current===s.code ? "#fffbeb" : "#fffdf5" }}
               title={s.label}>{s.code}</button>
           ))}
         </div>
@@ -159,11 +168,12 @@ function Dialog({ title, body, actions }: {
 
 // ─── 滑動選取彈出視窗
 function SwipeRangePopup({
-  nurseName, dates, workShifts, offShifts, onSelect, onClose,
+  nurseName, dates, workShifts, restShifts, offShifts, onSelect, onClose,
 }: {
   nurseName: string;
   dates: string[];
   workShifts: ShiftDef[];
+  restShifts: ShiftDef[];
   offShifts: ShiftDef[];
   onSelect: (shift: string | null) => void;
   onClose: () => void;
@@ -200,10 +210,16 @@ function SwipeRangePopup({
             <button key={s.code} onClick={() => onSelect(s.code)} style={btnBase}>{s.code}</button>
           ))}
         </div>
-        <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginBottom: 6 }}>放假 / 調整</div>
+        <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginBottom: 6 }}>應休</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {restShifts.map(s => (
+            <button key={s.code} onClick={() => onSelect(s.code)} style={{ ...btnBase, color: "#dc2626", borderColor: "#fecaca", background: "#fff5f5" }}>{s.code}</button>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: "#d97706", fontWeight: 700, marginBottom: 6 }}>放假 / 調整</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
           {offShifts.map(s => (
-            <button key={s.code} onClick={() => onSelect(s.code)} style={{ ...btnBase, color: "#dc2626", borderColor: "#fecaca", background: "#fff5f5" }}>{s.code}</button>
+            <button key={s.code} onClick={() => onSelect(s.code)} style={{ ...btnBase, color: "#d97706", borderColor: "#fde68a", background: "#fffdf5" }}>{s.code}</button>
           ))}
         </div>
         <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 8 }}>
@@ -1326,14 +1342,21 @@ export default function AdminPage() {
         .ap-cell.is-swipe-sel  { outline: 2.5px solid #0891b2; outline-offset: 1px; background: #cffafe !important; color: #164e63 !important; filter: none; }
         .ap-cell.is-anchor    { outline: 2px solid #2563eb; outline-offset: 1px; filter: none; }
 
-        /* 固定左欄 */
+        /* 固定左欄 + 固定表頭列 */
         .sticky-name {
           position: sticky; left: 0; z-index: 2;
           background: #fff; border-right: 2px solid #e2e8f0 !important;
           white-space: nowrap;
         }
-        .sticky-name-head { background: #f8fafc !important; }
-        .ap-th-day { padding: 6px 2px; text-align: center; font-size: 11px; font-weight: 700; color: #374151; background: #f8fafc; min-width: 42px; width: 42px; }
+        .sticky-name-head {
+          background: #f8fafc !important;
+          position: sticky; top: 0; left: 0; z-index: 5;
+        }
+        .ap-th-day {
+          padding: 6px 2px; text-align: center; font-size: 11px; font-weight: 700;
+          color: #374151; background: #f8fafc; min-width: 42px; width: 42px;
+          position: sticky; top: 0; z-index: 2;
+        }
         .ap-th-day.we { color: #dc2626; }
         .ap-td-shift { text-align: center; padding: 2px; }
 
@@ -1499,10 +1522,12 @@ export default function AdminPage() {
                       <th colSpan={refDays.length} style={{
                         textAlign:"center", fontSize:11, fontWeight:700, padding:"4px 6px",
                         background:"#f3f4f6", color:"#9ca3af", borderBottom:"none",
+                        position:"sticky", top:0, zIndex:2,
                       }}>上週參考（管理員填寫，護理師不可見）</th>
                       <th colSpan={cycleDays.length} style={{
                         textAlign:"center", fontSize:11, fontWeight:700, padding:"4px 6px",
                         background:"#eff6ff", color:"#1d4ed8", borderBottom:"none",
+                        position:"sticky", top:0, zIndex:2,
                       }}>本次排班週期（{cycle.start_date} ～ {cycle.end_date}）</th>
                     </tr>
                   )}
@@ -2943,7 +2968,8 @@ export default function AdminPage() {
           nurseName={popup.nurseName}
           current={schedule.find(r=>r.nurse_uid===popup.nurseUid&&r.date===popup.date)?.shift ?? ""}
           workShifts={workShifts}
-          offShifts={allOffShifts}
+          restShifts={restShifts}
+          offShifts={offShifts}
           onSelect={async (shift) => {
             // 先讀取再關閉，避免 popup 被清空後取不到值
             const nurseUid = popup!.nurseUid;
@@ -3135,7 +3161,8 @@ export default function AdminPage() {
           nurseName={batchPopup.nurseName}
           dates={batchPopup.dates}
           workShifts={workShifts}
-          offShifts={allOffShifts}
+          restShifts={restShifts}
+          offShifts={offShifts}
           onSelect={async (shift) => {
             const updates = batchPopup.dates.map(d => ({ nurse_uid: batchPopup.nurseUid, date: d, shift }));
             setBatchPopup(null);
@@ -3153,7 +3180,8 @@ export default function AdminPage() {
           nurseName={swipePopup.nurseName}
           dates={swipePopup.dates}
           workShifts={workShifts}
-          offShifts={allOffShifts}
+          restShifts={restShifts}
+          offShifts={offShifts}
           onSelect={async (shift) => {
             const updates = swipePopup.dates.map(d => ({ nurse_uid: swipePopup.nurseUid, date: d, shift }));
             setSwipePopup(null);

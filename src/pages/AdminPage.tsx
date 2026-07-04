@@ -2635,6 +2635,69 @@ export default function AdminPage() {
                     </div>
                   </div>
 
+                  {/* ── 人力試算 */}
+                  {(() => {
+                    const n = cycle.period_days;
+                    const fullNurses  = nurseUsers.filter(u => !u.halftime).length;
+                    const halfNurses  = nurseUsers.filter(u =>  u.halftime).length;
+                    const totalNurses = nurseUsers.length;
+                    // 每日上班人數合計（考慮特殊日期覆蓋比較複雜，這裡先用預設值）
+                    const dailyTotal  = rulesForm.daily_d + rulesForm.daily_e + rulesForm.daily_n;
+                    // 總需求人力 = 每日人數 × 天數
+                    const totalRequired = dailyTotal * n;
+                    // 各護理師可提供的上班天數 = 週期天數 - 應休天數
+                    const totalAvailable =
+                      fullNurses * (n - fullTimeOff) +
+                      halfNurses * (n - partTimeOff);
+                    // 多餘人力
+                    const surplus = totalAvailable - totalRequired;
+                    const color =
+                      surplus < 0  ? { bg:"#fef2f2", border:"#fecaca", text:"#dc2626", badge:"#ef4444" } :
+                      surplus === 0 ? { bg:"#f0fdf4", border:"#86efac", text:"#15803d", badge:"#22c55e" } :
+                                     { bg:"#fffbeb", border:"#fde68a", text:"#92400e", badge:"#f59e0b" };
+                    return (
+                      <div style={{ background:color.bg, border:`1px solid ${color.border}`, borderRadius:10, padding:"14px 16px", fontSize:13 }}>
+                        <div style={{ fontWeight:700, color:color.text, marginBottom:10, fontSize:14 }}>
+                          人力試算
+                        </div>
+                        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 20px", fontSize:12, color:"#374151", marginBottom:10 }}>
+                          <div>週期天數：<b>{n} 天</b></div>
+                          <div>每日需求：<b>D{rulesForm.daily_d}＋E{rulesForm.daily_e}＋N{rulesForm.daily_n}＝{dailyTotal} 人</b></div>
+                          <div>全職 {fullNurses} 人 × 可上 {n - fullTimeOff} 天 ＝ {fullNurses * (n - fullTimeOff)}</div>
+                          <div>半職 {halfNurses} 人 × 可上 {n - partTimeOff} 天 ＝ {halfNurses * (n - partTimeOff)}</div>
+                          <div>可提供總人力：<b>{totalAvailable}</b></div>
+                          <div>需求總人力：<b>{totalRequired}</b></div>
+                        </div>
+                        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                          <div style={{ fontSize:13, color:color.text, fontWeight:600 }}>
+                            多餘人力 ＝ {totalAvailable} － {totalRequired} ＝
+                          </div>
+                          <div style={{
+                            background: color.badge, color:"#fff",
+                            borderRadius:6, padding:"2px 12px", fontSize:16, fontWeight:800,
+                          }}>
+                            {surplus >= 0 ? `+${surplus}` : surplus}
+                          </div>
+                        </div>
+                        {surplus < 0 && (
+                          <div style={{ marginTop:8, fontSize:12, color:"#dc2626", fontWeight:600 }}>
+                            ⚠ 人力不足 {Math.abs(surplus)} 格，CP-SAT 可能無法生成班表。建議增加護理師人數或減少每日需求。
+                          </div>
+                        )}
+                        {surplus > 0 && (
+                          <div style={{ marginTop:8, fontSize:12, color:"#92400e" }}>
+                            多出 {surplus} 格彈性空間，系統會自動分配為 OFF（優先補足護理師應休天數）。
+                          </div>
+                        )}
+                        {surplus === 0 && (
+                          <div style={{ marginTop:8, fontSize:12, color:"#15803d" }}>
+                            人力剛好，系統無需補休。
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* ── 順班規則說明 */}
                   <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:10, padding:"14px 16px", fontSize:13, color:"#1e40af", lineHeight:1.8 }}>
                     <b>盡量順班 + 切換前盡量安排休息（固定啟用）</b><br />

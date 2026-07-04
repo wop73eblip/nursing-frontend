@@ -363,6 +363,13 @@ export default function AdminPage() {
   const [overwriteConfirmed, setOverwriteConfirmed] = useState(false);
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
+  const [pendingSchedule, setPendingSchedule] = useState<{
+    schedules: Record<string, Record<string, string>>;
+    cycle_dates: string[];
+    overwrite_confirmed: boolean;
+  } | null>(null);
+  const [committing, setCommitting] = useState(false);
+  const [commitResult, setCommitResult] = useState<string>("");
 
   const year = parseInt(ym.slice(0,4));
   const month = parseInt(ym.slice(5,7));
@@ -2524,7 +2531,9 @@ export default function AdminPage() {
           const filledCount      = schedule.filter(r => cycleDays.includes(r.date) && r.shift).length;
 
           async function runGenerate() {
-            setGenerating(true); setGenResult(""); setGenWarnings([]); setGenAnomalies([]); setConfirmGenerate(false);
+            setGenerating(true);
+            setGenResult(""); setGenWarnings([]); setGenAnomalies([]);
+            setConfirmGenerate(false); setPendingSchedule(null); setCommitResult("");
             try {
               const { data } = await api.post(
                 `/schedule/generate?overwrite_confirmed=${overwriteConfirmed}`
@@ -2532,11 +2541,28 @@ export default function AdminPage() {
               setGenResult(data.message ?? "完成");
               setGenWarnings(data.warnings ?? []);
               setGenAnomalies(data.anomalies ?? []);
-              setHasGenerated(true);
-              fetchSchedule();
+              setPendingSchedule({
+                schedules: data.schedules,
+                cycle_dates: data.cycle_dates,
+                overwrite_confirmed: overwriteConfirmed,
+              });
             } catch (err: any) {
               setGenResult("✗ " + (err.response?.data?.detail ?? err.message ?? "生成失敗"));
             } finally { setGenerating(false); }
+          }
+
+          async function runCommit() {
+            if (!pendingSchedule) return;
+            setCommitting(true); setCommitResult("");
+            try {
+              const { data } = await api.post("/schedule/commit", pendingSchedule);
+              setCommitResult(data.message ?? "匯入完成");
+              setHasGenerated(true);
+              setPendingSchedule(null);
+              fetchSchedule();
+            } catch (err: any) {
+              setCommitResult("✗ " + (err.response?.data?.detail ?? err.message ?? "匯入失敗"));
+            } finally { setCommitting(false); }
           }
 
           async function downloadExport(type: "preview" | "schedule") {
@@ -2673,10 +2699,39 @@ export default function AdminPage() {
                   {genResult && (
                     <div style={{
                       padding:"12px 16px", borderRadius:10, fontSize:13, fontWeight:600,
-                      background: genResult.startsWith("✗") ? "#fef2f2" : "#dcfce7",
-                      color:      genResult.startsWith("✗") ? "#dc2626" : "#15803d",
-                      border:     `1px solid ${genResult.startsWith("✗") ? "#fecaca" : "#bbf7d0"}`,
+                      background: genResult.startsWith("✗") ? "#fef2f2" : "#eff6ff",
+                      color:      genResult.startsWith("✗") ? "#dc2626" : "#1e40af",
+                      border:     `1px solid ${genResult.startsWith("✗") ? "#fecaca" : "#bfdbfe"}`,
                     }}>{genResult}</div>
+                  )}
+
+                  {/* ── 匯入確認區 */}
+                  {pendingSchedule && (
+                    <div style={{ background:"#f0fdf4", border:"1px solid #86efac", borderRadius:10, padding:"14px 16px" }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:"#15803d", marginBottom:6 }}>
+                        CP-SAT 計算完成，班表尚未寫入
+                      </div>
+                      <div style={{ fontSize:12, color:"#166534", marginBottom:12 }}>
+                        確認結果無誤後，點擊「匯入到班表」將班表寫入，再進行手動微調。
+                      </div>
+                      <button
+                        className="btn btn-primary"
+                        onClick={runCommit}
+                        disabled={committing}
+                        style={{ background:"#16a34a", borderColor:"#15803d" }}>
+                        {committing ? "匯入中…" : "匯入到班表"}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* ── 匯入結果 */}
+                  {commitResult && (
+                    <div style={{
+                      padding:"12px 16px", borderRadius:10, fontSize:13, fontWeight:600,
+                      background: commitResult.startsWith("✗") ? "#fef2f2" : "#dcfce7",
+                      color:      commitResult.startsWith("✗") ? "#dc2626" : "#15803d",
+                      border:     `1px solid ${commitResult.startsWith("✗") ? "#fecaca" : "#bbf7d0"}`,
+                    }}>{commitResult}</div>
                   )}
 
                   {/* ── 警告（人力不足縮減應休） */}

@@ -2640,7 +2640,6 @@ export default function AdminPage() {
                     const n = cycle.period_days;
                     const fullNurses  = nurseUsers.filter(u => !u.halftime).length;
                     const halfNurses  = nurseUsers.filter(u =>  u.halftime).length;
-                    const totalNurses = nurseUsers.length;
                     // 每日上班人數合計（考慮特殊日期覆蓋比較複雜，這裡先用預設值）
                     const dailyTotal  = rulesForm.daily_d + rulesForm.daily_e + rulesForm.daily_n;
                     // 總需求人力 = 每日人數 × 天數

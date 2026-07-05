@@ -761,12 +761,9 @@ export default function AdminPage() {
     } catch (err: any) {
       const detail = err.response?.data?.detail ?? err.message ?? "無法連線到伺服器";
       console.error("[updateShift] error:", err.response?.status, detail, err);
-      setSchedule(cur => {
-        const f = cur.filter(r => !(r.nurse_uid===nurse_uid && r.date===date));
-        if (prev) f.push({ nurse_uid, date, shift: prev });
-        return f;
-      });
       showToast(`✗ 儲存失敗（${err.response?.status ?? "網路錯誤"}）：${detail}`, false);
+      // 從伺服器重新載入實際狀態，避免 UI 與 DB 不一致
+      await fetchSchedule();
     } finally {
       setSaving(s => { const n = new Set(s); n.delete(key); return n; });
     }
@@ -806,15 +803,8 @@ export default function AdminPage() {
       setSaving(s => { const n = new Set(s); keys.forEach(k => n.delete(k)); return n; });
     }
     if (failed) {
-      setSchedule(prev => {
-        let next = [...prev];
-        for (const u of deduped) {
-          next = next.filter(r => !(r.nurse_uid===u.nurse_uid && r.date===u.date));
-          const p = prevMap.get(`${u.nurse_uid}_${u.date}`);
-          if (p) next.push({ nurse_uid: u.nurse_uid, date: u.date, shift: p });
-        }
-        return next;
-      });
+      // 從伺服器重新載入，避免 UI 與 DB 不一致
+      await fetchSchedule();
     }
   }
 
@@ -3032,9 +3022,30 @@ export default function AdminPage() {
               setReverting(true);
               setRevertResult("");
               try {
-                const { data } = await api.post("/schedule/revert");
-                setRevertResult(data.message ?? "✓ 已回復到預假狀態");
-                fetchSchedule();
+                // 找出所有「未確認（CP-SAT 生成）」的班別
+                const toDelete = scheduleRef.current.filter(
+                  r => cycleDays.includes(r.date) && !r.confirmed && r.shift
+                );
+                if (toDelete.length === 0) {
+                  setRevertResult("✓ 無需回復（沒有 CP-SAT 生成的班別）");
+                  setReverting(false);
+                  return;
+                }
+                // 逐一清除
+                let failed = 0;
+                for (const r of toDelete) {
+                  try {
+                    await api.post("/schedule/shift", { nurse_uid: r.nurse_uid, date: r.date, shift: null });
+                  } catch {
+                    failed++;
+                  }
+                }
+                if (failed > 0) {
+                  setRevertResult(`✗ 部分回復失敗（${failed}/${toDelete.length} 格），請重試`);
+                } else {
+                  setRevertResult(`✓ 已回復到預假狀態（清除 ${toDelete.length} 格）`);
+                }
+                await fetchSchedule();
               } catch (err: any) {
                 setRevertResult("✗ " + (err.response?.data?.detail ?? err.message ?? "回復失敗"));
               } finally { setReverting(false); }

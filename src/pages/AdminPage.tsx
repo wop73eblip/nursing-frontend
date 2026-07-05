@@ -746,7 +746,6 @@ export default function AdminPage() {
       return;
     }
     const key = `${nurse_uid}_${date}`;
-    const prev = schedule.find(r => r.nurse_uid===nurse_uid && r.date===date)?.shift ?? null;
     setSchedule(cur => {
       const f = cur.filter(r => !(r.nurse_uid===nurse_uid && r.date===date));
       if (shift) f.push({ nurse_uid, date, shift, confirmed: false, updated_by: user.uid });
@@ -775,8 +774,6 @@ export default function AdminPage() {
     const deduped = Array.from(
       new Map(updates.map(u => [`${u.nurse_uid}_${u.date}`, u])).values()
     );
-    const cur = scheduleRef.current;
-    const prevMap = new Map(deduped.map(u => [`${u.nurse_uid}_${u.date}`, cur.find(r => r.nurse_uid===u.nurse_uid && r.date===u.date)?.shift ?? null]));
     // 樂觀更新 UI
     setSchedule(prev => {
       let next = [...prev];

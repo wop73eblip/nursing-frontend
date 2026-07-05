@@ -262,6 +262,12 @@ export default function NursePage() {
   const autoScrollFrameRef = useRef<number | null>(null);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
 
+  // 浮動日期列（手機向上捲過 navbar 後固定）
+  const theadRowRef    = useRef<HTMLTableRowElement>(null);
+  const stickyScrollRef = useRef<HTMLDivElement>(null);
+  const [showStickyHdr, setShowStickyHdr] = useState(false);
+  const [colWidths, setColWidths]         = useState<number[]>([]);
+
   // 頁籤
   const [npTab, setNpTab] = useState<"schedule"|"settings">("schedule");
 
@@ -325,6 +331,43 @@ export default function NursePage() {
   useEffect(() => { shiftRangeRef.current = shiftRange; }, [shiftRange]);
   useEffect(() => { scrollSpeedRef.current = scrollSpeed; }, [scrollSpeed]);
   useEffect(() => { shiftAnchorRef.current = shiftAnchor; }, [shiftAnchor]);
+
+  // 量測日期列各欄寬度（days 或視窗大小改變時重測）
+  useEffect(() => {
+    const measure = () => {
+      const row = theadRowRef.current;
+      if (!row) return;
+      const ths = Array.from(row.querySelectorAll("th"));
+      if (!ths.length || ths[0].getBoundingClientRect().width === 0) return;
+      setColWidths(ths.map(th => th.getBoundingClientRect().width));
+    };
+    measure();
+    window.addEventListener("resize", measure, { passive: true });
+    return () => window.removeEventListener("resize", measure);
+  }, [days, nurses]);
+
+  // 監聽頁面垂直捲動，控制浮動日期列顯示
+  useEffect(() => {
+    const NAVBAR_H = 52;
+    const onScroll = () => {
+      const row = theadRowRef.current;
+      if (!row) return;
+      setShowStickyHdr(row.getBoundingClientRect().bottom <= NAVBAR_H);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // 同步水平捲動：表格 → 浮動列
+  useEffect(() => {
+    const wrap   = tableWrapRef.current;
+    const sticky = stickyScrollRef.current;
+    if (!wrap || !sticky) return;
+    const onScroll = () => { sticky.scrollLeft = wrap.scrollLeft; };
+    wrap.addEventListener("scroll", onScroll, { passive: true });
+    return () => wrap.removeEventListener("scroll", onScroll);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showStickyHdr]);
 
   async function loadAll() {
     try {
@@ -881,7 +924,7 @@ export default function NursePage() {
           <div className="tbl-scroll" ref={tableWrapRef} style={{ userSelect:"none", WebkitUserSelect:"none" }}>
             <table className="tbl">
               <thead>
-                <tr>
+                <tr ref={theadRowRef}>
                   <th className="th-name">姓名</th>
                   <th className="th-attr">班屬</th>
                   {days.map(d => {
@@ -1245,6 +1288,52 @@ export default function NursePage() {
             },
           ]}
         />
+      )}
+
+      {/* ── 浮動日期列（向上捲過 navbar 後固定） */}
+      {showStickyHdr && colWidths.length >= 2 && (
+        <div style={{
+          position: "fixed", top: 52, left: 0, right: 0,
+          zIndex: 98, background: "#f8fafc",
+          boxShadow: "0 2px 6px rgba(0,0,0,.10)",
+          overflow: "hidden",
+        }}>
+          <div
+            ref={stickyScrollRef}
+            style={{ overflowX: "auto", scrollbarWidth: "none" }}
+          >
+            <style>{`.sticky-hdr-scroll::-webkit-scrollbar { display: none }`}</style>
+            <table style={{
+              borderCollapse: "collapse",
+              tableLayout: "fixed",
+              width: colWidths.reduce((a, b) => a + b, 0),
+            }}>
+              <tbody>
+                <tr>
+                  {colWidths.map((w, i) => {
+                    if (i === 0) return (
+                      <th key={i} className="th-name" style={{ width: w }}>姓名</th>
+                    );
+                    if (i === 1) return (
+                      <th key={i} className="th-attr" style={{ width: w }}>班屬</th>
+                    );
+                    const d = days[i - 2];
+                    if (!d) return <th key={i} style={{ width: w }} />;
+                    const dow = dayjs(d).day();
+                    const isWe = dow === 0 || dow === 6;
+                    return (
+                      <th key={i} className={`th-day${isWe ? " we" : ""}`} style={{ width: w }}>
+                        <div style={{ fontSize: 9, opacity: .6 }}>{String(dayjs(d).month() + 1).padStart(2, "0")}</div>
+                        <div>{dayjs(d).date()}</div>
+                        <div style={{ fontSize: 9, opacity: .7 }}>{DOW_ZH_NP[dow]}</div>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* ── Toast */}

@@ -909,7 +909,7 @@ export default function NursePage() {
                         {isMe ? " ★" : ""}
                       </td>
                       <td className={`td-attr${isMe ? " is-me" : ""}`}>
-                        {n.attr ? attrShort(n.attr) : "—"}
+                        {attrShort(n.attr) || "—"}
                       </td>
                       {days.map(d => {
                         const entry     = nSched[d];
@@ -933,7 +933,7 @@ export default function NursePage() {
                           : shift ? "已填入（待確認），點擊修改"
                           : "點擊填入班別";
 
-                        const isSwipeSel = swipeDates.has(d) && (swipeRef.current !== null || swipePopup !== null);
+                        const isSwipeSel = isMe && swipeDates.has(d) && (swipeRef.current !== null || swipePopup !== null);
                         const isCtrlSel  = isMe && ctrlSelected.has(d);
                         const isShiftSel = isMe && shiftRange.has(d);
                         const swipeCls = isSwipeSel ? " is-swipe-sel" : "";

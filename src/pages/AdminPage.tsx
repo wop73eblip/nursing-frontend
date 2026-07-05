@@ -1583,7 +1583,7 @@ export default function AdminPage() {
                         {u.halftime && <span style={{ fontSize:9, color:"#16a34a", fontWeight:700, marginLeft:3 }}>半</span>}
                       </td>
                       <td className="sticky-attr">
-                        {u.attr ? attrShort(u.attr) : "—"}
+                        {attrShort(u.attr) || "—"}
                       </td>
                       {allDays.map(d => {
                         const isRef = refDays.includes(d);

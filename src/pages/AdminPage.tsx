@@ -1346,7 +1346,6 @@ export default function AdminPage() {
         .ap-th-day {
           padding: 6px 2px; text-align: center; font-size: 11px; font-weight: 700;
           color: #374151; background: #f8fafc; min-width: 42px; width: 42px;
-          position: sticky; z-index: 2;
         }
         .ap-th-day.we { color: #dc2626; }
         .ap-td-shift { text-align: center; padding: 2px; }
@@ -1520,13 +1519,13 @@ export default function AdminPage() {
             </div>
 
             {/* 表格 */}
-            <div ref={tableWrapRef} style={{ overflowX:"auto", overflowY:"auto", WebkitOverflowScrolling:"touch", userSelect:"none", WebkitUserSelect:"none" as any, maxHeight:"calc(100dvh - 280px)" }}>
+            <div ref={tableWrapRef} style={{ overflowX:"auto", WebkitOverflowScrolling:"touch", userSelect:"none", WebkitUserSelect:"none" as any }}>
               <table className="tbl">
                 <thead>
                   {/* 分段標題列（只在有週期時顯示） */}
                   {cycleIsSet && refDays.length > 0 && (
                     <tr>
-                      <th className="sticky-name sticky-name-head" style={{ minWidth:80, width:80, top:0 }} />
+                      <th className="sticky-name sticky-name-head" style={{ minWidth:80, width:80 }} />
                       <th colSpan={refDays.length} style={{
                         textAlign:"center", fontSize:11, fontWeight:700, padding:"4px 6px",
                         background:"#f3f4f6", color:"#9ca3af", borderBottom:"none",
@@ -1539,30 +1538,24 @@ export default function AdminPage() {
                       }}>本次排班週期（{cycle.start_date} ～ {cycle.end_date}）</th>
                     </tr>
                   )}
-                  {/* 日期標題列：有分段列時往下偏移 28px 避免重疊 */}
-                  {(() => {
-                    const segTop = (cycleIsSet && refDays.length > 0) ? 28 : 0;
-                    return (
-                      <tr>
-                        <th className="sticky-name sticky-name-head" style={{ minWidth:80, width:80, padding:"9px 12px", top:segTop }}>姓名</th>
-                        {allDays.map(d => {
-                          const isRef = refDays.includes(d);
-                          const dow = dayjs(d).day();
-                          const isWe = dow===0||dow===6;
-                          return (
-                            <th key={d} className={`ap-th-day${isWe?" we":""}`}
-                              style={{ top:segTop, background: isRef ? "#f8fafc" : undefined,
-                                       color: isRef ? "#c4c4c4" : (isWe ? "#dc2626" : undefined) }}>
-                              <div style={{ fontSize:10, color: isRef?"#d1d5db":undefined }}>
-                                {dayjs(d).format("M/D")}
-                              </div>
-                              <div style={{ fontSize:9, opacity:.7 }}>{DOW_ZH[dow]}</div>
-                            </th>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })()}
+                  <tr>
+                    <th className="sticky-name sticky-name-head" style={{ minWidth:80, width:80, padding:"9px 12px" }}>姓名</th>
+                    {allDays.map(d => {
+                      const isRef = refDays.includes(d);
+                      const dow = dayjs(d).day();
+                      const isWe = dow===0||dow===6;
+                      return (
+                        <th key={d} className={`ap-th-day${isWe?" we":""}`}
+                          style={{ background: isRef ? "#f8fafc" : undefined,
+                                   color: isRef ? "#c4c4c4" : (isWe ? "#dc2626" : undefined) }}>
+                          <div style={{ fontSize:10, color: isRef?"#d1d5db":undefined }}>
+                            {dayjs(d).format("M/D")}
+                          </div>
+                          <div style={{ fontSize:9, opacity:.7 }}>{DOW_ZH[dow]}</div>
+                        </th>
+                      );
+                    })}
+                  </tr>
                 </thead>
                 <tbody>
                   {nurseUsers.map(u => (

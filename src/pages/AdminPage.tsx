@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
+import * as XLSX from "xlsx";
 import api from "../api";
 import { getAuth, clearAuth } from "../auth";
 
@@ -2832,24 +2833,31 @@ export default function AdminPage() {
                         <button
                           className="btn btn-gray"
                           disabled={committing}
-                          onClick={async () => {
-                            const token = getAuth()?.token;
-                            const base = (api.defaults.baseURL ?? "").replace(/\/$/, "");
-                            try {
-                              const res = await fetch(`${base}/export/temp`, {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-                                body: JSON.stringify(pendingSchedule),
+                          onClick={() => {
+                            if (!pendingSchedule) return;
+                            const restCodes = new Set(restShifts.map(s => s.code));
+                            const uidName: Record<string, string> = {};
+                            const uidHalf: Record<string, boolean> = {};
+                            nurseUsers.forEach(u => { uidName[u.uid] = u.name; uidHalf[u.uid] = u.halftime; });
+                            // 現有 DB 班別 → 人工填寫（粗體外框標記）
+                            const manualKeys = new Set(schedule.map(r => `${r.nurse_uid}_${r.date}`));
+                            const rows: { 姓名: string; 帳號: string; 日期: string; 班別: string; _bold: boolean }[] = [];
+                            nurseUsers.forEach(u => {
+                              const dateMap = pendingSchedule!.schedules[u.uid] ?? {};
+                              pendingSchedule!.cycle_dates.forEach(d => {
+                                const shift = dateMap[d] ?? "OFF";
+                                if (!shift || shift === "OFF") return;
+                                const isHalf = uidHalf[u.uid];
+                                const display = isHalf && restCodes.has(shift) ? "休假" : shift;
+                                rows.push({ 姓名: u.name, 帳號: u.uid, 日期: d, 班別: display, _bold: manualKeys.has(`${u.uid}_${d}`) });
                               });
-                              if (!res.ok) { const err = await res.json().catch(() => ({})); alert("匯出失敗：" + (err.detail ?? res.statusText)); return; }
-                              const blob = await res.blob();
-                              const blobUrl = URL.createObjectURL(blob);
-                              const link = document.createElement("a");
-                              link.href = blobUrl;
-                              link.download = `暫時班表_${cycle.start_date}_${cycle.end_date}.xlsx`;
-                              link.click();
-                              URL.revokeObjectURL(blobUrl);
-                            } catch (e: any) { alert("匯出失敗：" + (e.message ?? "網路錯誤")); }
+                            });
+                            const wsData = [["姓名","帳號","日期","班別"], ...rows.map(r => [r.姓名, r.帳號, r.日期, r.班別])];
+                            const ws = XLSX.utils.aoa_to_sheet(wsData);
+                            ws["!cols"] = [{wch:14},{wch:14},{wch:14},{wch:10}];
+                            const wb = XLSX.utils.book_new();
+                            XLSX.utils.book_append_sheet(wb, ws, "暫時班表");
+                            XLSX.writeFile(wb, `暫時班表_${cycle.start_date}_${cycle.end_date}.xlsx`);
                           }}>
                           匯出暫時班表
                         </button>

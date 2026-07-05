@@ -2462,12 +2462,14 @@ export default function AdminPage() {
                 </div>
                 {/* 僅管理員 */}
                 <div>
-                  <div style={{ fontSize:11, color:"#6b7280", marginBottom:5 }}>僅管理員</div>
                   <label className="fcheck" style={{ margin:0 }}>
                     <input type="checkbox" checked={!!s.admin_only}
                       onChange={e => updateShiftDef(type, i, "admin_only", e.target.checked)} />
                     <span style={{ fontSize:12 }}>管理員才能填入</span>
                   </label>
+                  {s.admin_only && (
+                    <div style={{ fontSize:11, color:"#9ca3af", marginTop:4, paddingLeft:4 }}>🔒 此班別護理師不可自行填入</div>
+                  )}
                 </div>
                 {/* 操作 */}
                 <div style={{ marginLeft:"auto" }}>
@@ -2475,9 +2477,6 @@ export default function AdminPage() {
                     onClick={() => removeShift(type, i)}>刪除</button>
                 </div>
               </div>
-              {s.admin_only && (
-                <div style={{ fontSize:11, color:"#9ca3af", marginTop:4, paddingLeft:4 }}>🔒 此班別護理師不可自行填入</div>
-              )}
             </div>
           );
           return (

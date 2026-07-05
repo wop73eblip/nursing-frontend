@@ -2591,6 +2591,17 @@ export default function AdminPage() {
               const { data } = await api.post("/schedule/commit", pendingSchedule);
               setCommitResult(data.message ?? "匯入完成");
               setHasGenerated(true);
+              // 儲存本次生成的格子 key，供「回復到預假狀態」使用
+              const generatedKeys = pendingSchedule.cycle_dates.flatMap(d =>
+                Object.entries(pendingSchedule!.schedules)
+                  .filter(([, shifts]) => shifts[d] && shifts[d] !== "OFF")
+                  .map(([uid]) => `${uid}_${d}`)
+              );
+              localStorage.setItem("cpsat_generated_keys", JSON.stringify(generatedKeys));
+              localStorage.setItem("cpsat_generated_cycle", JSON.stringify({
+                start: pendingSchedule.cycle_dates[0],
+                end: pendingSchedule.cycle_dates[pendingSchedule.cycle_dates.length - 1],
+              }));
               setPendingSchedule(null);
               fetchSchedule();
             } catch (err: any) {
@@ -3019,15 +3030,48 @@ export default function AdminPage() {
               setReverting(true);
               setRevertResult("");
               try {
-                // 找出所有「未確認（CP-SAT 生成）」的班別
-                const toDelete = scheduleRef.current.filter(
-                  r => cycleDays.includes(r.date) && !r.confirmed && r.shift
-                );
+                // ── 取得 CP-SAT 生成格子清單（三層優先序）
+                let generatedKeySet: Set<string> | null = null;
+
+                // 層 1：localStorage（本次 commit 時前端存入）
+                const lsKeys: string[] = JSON.parse(localStorage.getItem("cpsat_generated_keys") ?? "[]");
+                if (lsKeys.length > 0) {
+                  generatedKeySet = new Set(lsKeys);
+                }
+
+                // 層 2：後端 rules.last_generated_keys（由 /schedule/commit 存入 DB）
+                if (!generatedKeySet) {
+                  try {
+                    const { data: rd } = await api.get("/rules");
+                    const serverKeys: string[] = rd?.rules?.last_generated_keys ?? [];
+                    if (serverKeys.length > 0) generatedKeySet = new Set(serverKeys);
+                  } catch { /* 忽略，繼續 */ }
+                }
+
+                let toDelete: ShiftRow[] = [];
+
+                if (generatedKeySet) {
+                  // 用精確的 key 清單找出要刪除的格子（不管 confirmed 狀態）
+                  toDelete = scheduleRef.current.filter(r =>
+                    r.shift && generatedKeySet!.has(`${r.nurse_uid}_${r.date}`)
+                  );
+                } else {
+                  // 層 3 備用：找本週期內所有 confirmed=false 的班別
+                  toDelete = scheduleRef.current.filter(
+                    r => cycleDays.includes(r.date) && !r.confirmed && r.shift
+                  );
+                }
+
                 if (toDelete.length === 0) {
-                  setRevertResult("✓ 無需回復（沒有 CP-SAT 生成的班別）");
+                  if (!generatedKeySet) {
+                    setRevertResult("✗ 找不到 CP-SAT 生成紀錄（請確認已執行「匯入到班表」，且後端已更新到最新版本）");
+                  } else {
+                    setRevertResult("✓ 無需回復（CP-SAT 生成的班別已全部清除）");
+                  }
                   setReverting(false);
                   return;
                 }
+
                 // 逐一清除
                 let failed = 0;
                 for (const r of toDelete) {
@@ -3037,10 +3081,13 @@ export default function AdminPage() {
                     failed++;
                   }
                 }
+
                 if (failed > 0) {
                   setRevertResult(`✗ 部分回復失敗（${failed}/${toDelete.length} 格），請重試`);
                 } else {
                   setRevertResult(`✓ 已回復到預假狀態（清除 ${toDelete.length} 格）`);
+                  localStorage.removeItem("cpsat_generated_keys");
+                  localStorage.removeItem("cpsat_generated_cycle");
                 }
                 await fetchSchedule();
               } catch (err: any) {

@@ -1336,12 +1336,28 @@ export default function AdminPage() {
         /* 固定左欄 + 固定表頭列 */
         .sticky-name {
           position: sticky; left: 0; z-index: 2;
-          background: #fff; border-right: 2px solid #e2e8f0 !important;
+          background: #fff;
           white-space: nowrap;
         }
         .sticky-name-head {
           background: #f8fafc !important;
           position: sticky; left: 0; z-index: 5;
+        }
+        /* 班屬欄 */
+        .sticky-attr {
+          position: sticky; left: 80px; z-index: 2;
+          background: #fff; border-right: 2px solid #e2e8f0 !important;
+          white-space: nowrap; text-align: center;
+          width: 36px; min-width: 36px;
+          font-size: 10px; font-weight: 600; color: #9ca3af;
+          padding: 4px 2px;
+        }
+        .sticky-attr-head {
+          background: #f8fafc !important;
+          position: sticky; left: 80px; z-index: 5;
+          border-right: 2px solid #e2e8f0 !important;
+          text-align: center; font-size: 11px; font-weight: 700; color: #6b7280;
+          padding: 9px 4px; width: 36px; min-width: 36px;
         }
         .ap-th-day {
           padding: 6px 2px; text-align: center; font-size: 11px; font-weight: 700;
@@ -1526,6 +1542,7 @@ export default function AdminPage() {
                   {cycleIsSet && refDays.length > 0 && (
                     <tr>
                       <th className="sticky-name sticky-name-head" style={{ minWidth:80, width:80 }} />
+                      <th className="sticky-attr-head" />
                       <th colSpan={refDays.length} style={{
                         textAlign:"center", fontSize:11, fontWeight:700, padding:"4px 6px",
                         background:"#f3f4f6", color:"#9ca3af", borderBottom:"none",
@@ -1540,6 +1557,7 @@ export default function AdminPage() {
                   )}
                   <tr>
                     <th className="sticky-name sticky-name-head" style={{ minWidth:80, width:80, padding:"9px 12px" }}>姓名</th>
+                    <th className="sticky-attr-head">班屬</th>
                     {allDays.map(d => {
                       const isRef = refDays.includes(d);
                       const dow = dayjs(d).day();
@@ -1562,7 +1580,10 @@ export default function AdminPage() {
                     <tr key={u.uid}>
                       <td className="sticky-name" style={{ padding:"6px 10px", fontSize:13, fontWeight:600 }}>
                         {u.name}
-                        {u.attr && <span style={{ fontSize:10, color:"#9ca3af", fontWeight:400, marginLeft:3 }}>{attrShort(u.attr)}</span>}
+                        {u.halftime && <span style={{ fontSize:9, color:"#16a34a", fontWeight:700, marginLeft:3 }}>半</span>}
+                      </td>
+                      <td className="sticky-attr">
+                        {u.attr ? attrShort(u.attr) : "—"}
                       </td>
                       {allDays.map(d => {
                         const isRef = refDays.includes(d);

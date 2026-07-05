@@ -213,7 +213,7 @@ function Dialog({
 
 // ─── 主頁面
 type Entry = { shift: string; confirmed: boolean; updated_by?: string };
-type NurseInfo = { uid: string; name: string; attr: string; level: string; role: string; sort_order: number };
+type NurseInfo = { uid: string; name: string; attr: string; level: string; role: string; sort_order: number; halftime: boolean };
 
 export default function NursePage() {
   const nav  = useNavigate();
@@ -691,13 +691,24 @@ export default function NursePage() {
         .th-name, .td-name {
           position: sticky; left: 0; z-index: 2;
           background: #f8fafc;
-          border-right: 2px solid #e2e8f0 !important;
           white-space: nowrap;
           width: 70px; min-width: 70px;
         }
         .th-name { padding: 8px 10px; font-size: 11px; font-weight: 700; color: #6b7280; text-align: left; }
         .td-name { padding: 7px 10px; font-size: 13px; font-weight: 700; color: #111827; background: #fff; }
         .td-name.is-me { color: #1d4ed8; background: #eff6ff; }
+
+        /* 班屬欄 */
+        .th-attr, .td-attr {
+          position: sticky; left: 70px; z-index: 2;
+          background: #f8fafc;
+          border-right: 2px solid #e2e8f0 !important;
+          white-space: nowrap;
+          width: 34px; min-width: 34px; text-align: center;
+        }
+        .th-attr { padding: 8px 4px; font-size: 11px; font-weight: 700; color: #6b7280; }
+        .td-attr { padding: 4px 2px; font-size: 10px; font-weight: 600; color: #9ca3af; background: #fff; }
+        .td-attr.is-me { background: #eff6ff; }
 
         /* 日期欄 */
         .th-day { padding: 6px 2px; text-align: center; font-size: 11px; font-weight: 700; color: #374151; background: #f8fafc; width: 42px; min-width: 42px; line-height: 1.3; }
@@ -778,6 +789,7 @@ export default function NursePage() {
 
         @media (max-width: 480px) {
           .th-name, .td-name, .td-name-off { width: 56px; min-width: 56px; font-size: 11px; padding: 6px 7px; }
+          .th-attr, .td-attr { left: 56px; width: 28px; min-width: 28px; font-size: 9px; }
           .th-day { width: 34px; min-width: 34px; }
           .cell-span { width: 28px; height: 26px; font-size: 11px; }
           .np-body { padding: 10px 8px 80px; }
@@ -788,6 +800,7 @@ export default function NursePage() {
           .th-day { min-width: 30px !important; width: 30px !important; font-size: 9px !important; padding: 4px 1px !important; }
           .td-shift { padding: 1px !important; }
           .th-name, .td-name, .td-name-off { font-size: 10px !important; min-width: 50px !important; width: 50px !important; }
+          .th-attr, .td-attr { left: 50px !important; width: 26px !important; min-width: 26px !important; font-size: 9px !important; }
         }
       `}</style>
 
@@ -870,6 +883,7 @@ export default function NursePage() {
               <thead>
                 <tr>
                   <th className="th-name">姓名</th>
+                  <th className="th-attr">班屬</th>
                   {days.map(d => {
                     const dow = dayjs(d).day();
                     const isWe = dow === 0 || dow === 6;
@@ -890,8 +904,12 @@ export default function NursePage() {
                   return (
                     <tr key={n.uid}>
                       <td className={`td-name${isMe ? " is-me" : ""}`}>
-                        {n.name}{isMe ? " ★" : ""}
-                        {n.attr && <span style={{ fontSize: 9, color: isMe ? "#93c5fd" : "#9ca3af", fontWeight: 400, marginLeft: 3 }}>{attrShort(n.attr)}</span>}
+                        {n.name}
+                        {n.halftime && <span style={{ fontSize: 9, color: "#16a34a", fontWeight: 700, marginLeft: 3 }}>半</span>}
+                        {isMe ? " ★" : ""}
+                      </td>
+                      <td className={`td-attr${isMe ? " is-me" : ""}`}>
+                        {n.attr ? attrShort(n.attr) : "—"}
                       </td>
                       {days.map(d => {
                         const entry     = nSched[d];
@@ -975,6 +993,7 @@ export default function NursePage() {
                 {/* 每日休假人數 */}
                 <tr>
                   <td className="td-name-off">休假</td>
+                  <td className="td-attr" style={{ background:"#f3f4f6" }} />
                   {days.map(d => (
                     <td key={d} className="td-daily-off">
                       {dailyOff[d] > 0

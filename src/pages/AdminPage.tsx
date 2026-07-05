@@ -309,7 +309,7 @@ export default function AdminPage() {
   const [editUser, setEditUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState<Partial<User & { new_password: string; showEditPwd?: boolean }>>({});
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null);
-  const [clearLogsConfirm, setClearLogsConfirm] = useState<{hours:number; label:string} | null>(null);
+  const [clearLogsConfirm, setClearLogsConfirm] = useState<{hours:number; label:string; all?:boolean} | null>(null);
   // 拖曳排序
   const userItemRefs  = useRef<(HTMLDivElement | null)[]>([]);
   const shiftWorkRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -698,9 +698,9 @@ export default function AdminPage() {
     try { const { data } = await api.get("/logs"); setLogs(data.logs ?? []); }
     catch {}
   }
-  async function clearLogs(hours: number) {
+  async function clearLogs(hours: number, all?: boolean) {
     try {
-      await api.delete("/logs", { params: { before_hours: hours } });
+      await api.delete("/logs", { params: all ? {} : { before_hours: hours } });
       showToast("✓ 操作紀錄已清除");
       fetchLogs();
     } catch { showToast("✗ 清除失敗", false); }
@@ -2940,9 +2940,13 @@ export default function AdminPage() {
                   defaultValue=""
                   onChange={e => {
                     if (!e.target.value) return;
-                    const hours = parseInt(e.target.value);
-                    const labels: Record<string,string> = { "24":"一天之外","72":"三天之外","168":"一週之外","720":"一個月之外" };
-                    setClearLogsConfirm({ hours, label: labels[e.target.value] ?? e.target.value });
+                    if (e.target.value === "all") {
+                      setClearLogsConfirm({ hours: 0, label: "全部紀錄", all: true });
+                    } else {
+                      const hours = parseInt(e.target.value);
+                      const labels: Record<string,string> = { "24":"一天之外","72":"三天之外","168":"一週之外","720":"一個月之外" };
+                      setClearLogsConfirm({ hours, label: labels[e.target.value] ?? e.target.value });
+                    }
                     e.target.value = "";
                   }}
                   style={{ fontSize:12, border:"1px solid #e5e7eb", borderRadius:6, padding:"4px 8px", background:"#f9fafb", fontFamily:"inherit", cursor:"pointer" }}>
@@ -2951,6 +2955,7 @@ export default function AdminPage() {
                   <option value="72">三天之外</option>
                   <option value="168">一週之外</option>
                   <option value="720">一個月之外</option>
+                  <option value="all">全部紀錄</option>
                 </select>
               </div>
             </div>
@@ -3273,11 +3278,11 @@ export default function AdminPage() {
       {/* ── 清除操作紀錄確認 Dialog */}
       {clearLogsConfirm && (
         <Dialog
-          title={`確定要清除「${clearLogsConfirm.label}」的操作紀錄？`}
-          body="此操作無法復原，將刪除指定時間點之前的所有操作紀錄。"
+          title={clearLogsConfirm.all ? "確定要清除所有操作紀錄嗎？" : `確定要清除「${clearLogsConfirm.label}」的操作紀錄？`}
+          body={clearLogsConfirm.all ? "此動作無法復原，將刪除全部操作紀錄。" : "此操作無法復原，將刪除指定時間點之前的所有操作紀錄。"}
           actions={[
             { label:"取消", onClick:() => setClearLogsConfirm(null) },
-            { label:"確認清除", danger:true, onClick:() => clearLogs(clearLogsConfirm.hours) },
+            { label:"確認清除", danger:true, onClick:() => clearLogs(clearLogsConfirm.hours, clearLogsConfirm.all) },
           ]}
         />
       )}

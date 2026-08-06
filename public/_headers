@@ -1,0 +1,5 @@
+# 遊戲檔案不給瀏覽器快取（每次都跟伺服器確認版本），
+# 避免部署新版後玩家還在跑舊的 HTML/JS/JSON 造成「載入存檔失敗」等怪問題。
+# 圖片等大檔仍會回 304 Not Modified，流量成本很低。
+/game/*
+  Cache-Control: no-cache

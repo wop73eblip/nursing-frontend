@@ -1,0 +1,4 @@
+{
+  "staff_card": { "name": "職員證", "icon": "🪪", "desc": "醫院職員識別證，用來刷卡進出管制區。" },
+  "conference_cabinet_key": { "name": "會議室櫃子鑰匙", "icon": "🗝️", "desc": "會議室裡某個櫃子的鑰匙。" }
+}

@@ -1,0 +1,368 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>主線任務 · 學習系統</title>
+<style>
+  :root{
+    --bg:#efe7db;--ink:#4a3f34;--muted:#8a7c6b;--accent:#e8a34d;--accent2:#c9822b;
+    --wall:#c9b79c;--wall2:#b8a488;--panel:#fffdf7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:
+    radial-gradient(900px 500px at 50% -10%,#fff6e8,transparent),var(--bg);
+    color:var(--ink);font-family:"Segoe UI","Microsoft JhengHei",system-ui,sans-serif;
+    min-height:100vh;display:flex;flex-direction:column;align-items:center;
+    padding:0 0 14px}
+  h1{font-size:19px;margin:14px 0 10px;text-align:center}
+
+  /* 主標以下的內容區：自己負責左右留白（頁首則滿版） */
+  .gwrap{width:100%;display:flex;flex-direction:column;align-items:center;padding:0 14px}
+
+  /* 頁首 navbar：比照「護理排班」，滿版置頂（body 已無左右 padding，width:100% 即滿版） */
+  .gnav{position:sticky;top:0;z-index:100;width:100%;
+    height:52px;background:#fff;border-bottom:1px solid #e5e7eb;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 14px;gap:8px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+  .gnav-l{display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden}
+  .gnav-r{display:flex;align-items:center;gap:6px;flex-shrink:0}
+  /* 字級、按鍵大小比照排班系統（.np-nav / .xbtn） */
+  .gnav-brand{font-size:15px;font-weight:800;color:#1d4ed8;white-space:nowrap}
+  .gnav-name{font-size:13px;color:#6b7280;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;max-width:120px}
+  .gnav-devuser{font-family:inherit;border:1px solid #e5e7eb;border-radius:8px;
+    padding:4px 6px;font-size:12px;background:#fff}
+  .xbtn{border:none;border-radius:8px;font-family:inherit;cursor:pointer;
+    font-size:13px;font-weight:600;white-space:nowrap;padding:7px 13px;transition:opacity .15s}
+  .xbtn:active{opacity:.7}
+  .xbtn-gray{background:#f3f4f6;color:#374151}
+  .xbtn-redsoft{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+  .xbtn.on{background:#2563eb;color:#fff}   /* 開發模式：開啟時 */
+  /* 手機：字級維持與排班相同，只微縮左右內距與間距避免擠爆 */
+  @media (max-width:480px){
+    .gnav{padding:0 12px;gap:6px}
+    .gnav-r{gap:5px}
+    .xbtn{padding:7px 10px}
+    .gnav-name{max-width:84px}
+  }
+
+  /* 舞台：場景 + 對話框疊層 */
+  #stage{position:relative;width:100%;max-width:640px}
+
+  /* ---- SceneViewer ---- */
+  .sv-root{width:100%}
+  /* 外框用 aspect-ratio 鎖成 1086/1448（＝3/4），任何場景切換都不會 reflow */
+  .sv-frame{position:relative;width:100%;aspect-ratio:1086/1448;overflow:hidden;
+    border:4px solid var(--wall);border-radius:18px;
+    background:linear-gradient(135deg,#d9c9ad,#c9b79c);
+    box-shadow:0 6px 0 var(--wall2),0 12px 24px #0002}
+  /* 兩張 <img> 疊在一起。當前顯示的加 .on（opacity:1、z-index:1），
+     另一張在背後預先 decode。切換時淡入淡出，看不出換圖動作。 */
+  .sv-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+    opacity:0;z-index:0;transition:opacity .18s ease;pointer-events:none}
+  .sv-image.on{opacity:1;z-index:1}
+  /* 圖片載入失敗時的佔位樣式 */
+  .sv-frame.sv-broken .sv-image.on{object-fit:contain;color:var(--muted);
+    font-size:13px;padding:12px;text-align:center;opacity:1}
+  .sv-overlay{position:absolute;inset:0;z-index:2}
+  .sv-hotspot{position:absolute;margin:0;padding:0;border:0;background:transparent;
+    cursor:pointer;border-radius:8px;transition:.12s;
+    -webkit-tap-highlight-color:transparent;outline:none;-webkit-appearance:none;appearance:none}
+  .sv-hotspot:focus,.sv-hotspot:focus-visible,.sv-hotspot:active{outline:none;box-shadow:none}
+  .sv-hotspot-label{display:none;position:absolute;left:0;top:-20px;font-size:11px;
+    background:#000a;color:#fff;padding:1px 6px;border-radius:6px;white-space:nowrap}
+  .sv-dev .sv-hotspot{background:rgba(232,163,77,.30);outline:2px dashed var(--accent2)}
+  .sv-dev .sv-hotspot:hover{background:rgba(232,163,77,.50)}
+  .sv-dev .sv-hotspot-label{display:block}
+  .sv-exit{position:absolute;width:44px;height:44px;border-radius:50%;
+    border:2px solid var(--accent2);background:var(--accent);color:#fff;
+    font-size:22px;font-weight:800;cursor:pointer;box-shadow:0 3px 0 var(--accent2);
+    display:flex;align-items:center;justify-content:center;transition:.12s;
+    -webkit-tap-highlight-color:transparent;outline:none}
+  .sv-exit:focus,.sv-exit:focus-visible{outline:none}
+  .sv-exit:hover{filter:brightness(1.05)}
+  .sv-exit:active{transform:translate(0,1px)}
+
+  /* ---- Dialogue ---- */
+  .dlg-overlay{position:absolute;inset:0;display:none;align-items:flex-end;justify-content:center;
+    background:linear-gradient(to top,#0004,transparent 45%);border-radius:18px}
+  .dlg-overlay.on{display:flex}
+  .dlg-box{width:94%;margin-bottom:14px;background:var(--panel);border:3px solid var(--accent);
+    border-radius:16px;padding:14px 16px;box-shadow:0 8px 24px #0003}
+  .dlg-who{color:var(--accent2);font-weight:800;font-size:15px;margin-bottom:5px}
+  .dlg-text{font-size:14px;line-height:1.8;min-height:24px}
+  .dlg-choices{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+  .dlg-opt{text-align:left;background:#fbf3e5;border:2px solid var(--wall);color:var(--ink);
+    padding:10px 12px;border-radius:10px;cursor:pointer;font-size:14px;transition:.12s}
+  .dlg-opt:hover{border-color:var(--accent2);transform:translateX(2px)}
+  .dlg-cont{text-align:right;margin-top:10px}
+  .dlg-cont-btn{background:var(--accent);color:#fff;border:none;border-radius:10px;
+    padding:8px 16px;font-weight:800;cursor:pointer;font-size:14px}
+
+  /* ---- Inventory：3 格方形，靠右 ---- */
+  #inv{width:100%;max-width:640px;margin-top:10px;display:flex;gap:10px;justify-content:flex-end}
+  .inv-slot{width:72px;height:72px;border-radius:14px;border:2px solid var(--wall);
+    background:#fff;box-shadow:0 2px 0 var(--wall2);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:2px;cursor:default;padding:4px;transition:.12s}
+  .inv-slot.filled{cursor:pointer;background:#fbf3e5}
+  .inv-slot.filled:hover{border-color:var(--accent2);transform:translateY(-1px)}
+  .inv-slot.selected{border-color:var(--accent2);background:#ffe9c9;
+    box-shadow:0 0 0 3px rgba(232,163,77,.45),0 2px 0 var(--wall2)}
+  .inv-icon{font-size:26px;line-height:1}
+  .inv-name{font-size:11px;font-weight:700;color:var(--ink);text-align:center;line-height:1.1}
+
+  .loading{text-align:center;padding:60px 20px;color:var(--muted);font-size:15px}
+
+  /* ---- 留言板 ---- */
+  .mb-overlay{position:fixed;inset:0;z-index:200;display:none;
+    align-items:flex-start;justify-content:center;background:rgba(20,15,10,.5);padding:16px}
+  .mb-overlay.on{display:flex}
+  .mb-panel{width:100%;max-width:460px;margin-top:8vh;background:var(--panel);
+    border:3px solid var(--accent);border-radius:16px;box-shadow:0 12px 40px #0005;
+    display:flex;flex-direction:column;max-height:82vh;overflow:hidden}
+  .mb-head{display:flex;align-items:center;justify-content:space-between;
+    padding:12px 14px;border-bottom:1px solid var(--wall)}
+  .mb-title{font-weight:800;color:var(--accent2);font-size:16px}
+  .mb-close{border:none;background:#0000000d;border-radius:8px;width:30px;height:30px;
+    font-size:15px;cursor:pointer;color:var(--ink)}
+  .mb-compose{padding:12px 14px;border-bottom:1px solid var(--wall)}
+  .mb-input{width:100%;border:2px solid var(--wall);border-radius:10px;padding:10px;
+    font-family:inherit;font-size:15px;line-height:1.6;resize:vertical;color:var(--ink);background:#fff}
+  .mb-input:focus{outline:none;border-color:var(--accent2)}
+  .mb-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:8px}
+  .mb-status{font-size:12px;color:var(--muted);margin-right:auto}
+  .mb-send{border:none;background:var(--accent);color:#fff;font-weight:800;
+    border-radius:10px;padding:9px 18px;font-size:14px;cursor:pointer}
+  .mb-send:disabled{opacity:.5;cursor:default}
+  .mb-listwrap{padding:10px 14px 14px;overflow-y:auto}
+  .mb-listtitle{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:8px}
+  .mb-item{background:#fff;border:1px solid var(--wall);border-radius:10px;padding:9px 11px;margin-bottom:8px}
+  .mb-item-meta{font-size:11px;color:var(--muted);margin-bottom:3px}
+  .mb-item-text{font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+  .mb-empty{color:var(--muted);font-size:13px;text-align:center;padding:16px 0}
+
+  /* ---- 終端機解謎 ---- */
+  .term-overlay{position:fixed;inset:0;z-index:210;display:none;
+    align-items:center;justify-content:center;background:rgba(5,8,10,.72);padding:16px}
+  .term-overlay.on{display:flex}
+  .term-monitor{width:100%;max-width:440px;background:#1a2230;border:6px solid #2b3444;
+    border-radius:16px;box-shadow:0 16px 50px #000a, inset 0 0 0 2px #0c1017;overflow:hidden}
+  .term-screen{background:#04120a;padding:20px 18px 22px;min-height:180px;
+    font-family:"Courier New",ui-monospace,monospace;
+    box-shadow:inset 0 0 60px #0f5, inset 0 0 12px #000;}
+  .term-title{color:#3ad07a;font-size:12px;letter-spacing:2px;opacity:.8;margin-bottom:18px}
+  .term-promptline{display:flex;align-items:center;gap:6px;color:#5effa0;font-size:18px}
+  .term-input{flex:1;min-width:0;background:transparent;border:none;border-bottom:2px solid #2f7a4d;
+    color:#7dffb0;font-family:inherit;font-size:20px;letter-spacing:4px;padding:4px 2px;
+    caret-color:#7dffb0;text-shadow:0 0 6px #3ad07a}
+  .term-input:focus{outline:none;border-bottom-color:#5effa0}
+  .term-input::placeholder{color:#2f7a4d;letter-spacing:2px}
+  .term-msg{min-height:22px;margin-top:16px;font-size:18px;font-weight:800;letter-spacing:3px;color:#5effa0;text-align:center}
+  /* 注意：class 必須是 .term-err（不能用 .err） —— 頁尾 .err 也在同一份 CSS 裡且有 display:none，會把 ERROR 整個藏起來 */
+  .term-msg.term-err{color:#ff5252;text-shadow:0 0 8px #ff0a0a,0 0 2px #fff6;animation:term-shake .28s}
+  @keyframes term-shake{
+    0%,100%{transform:translateX(0)}
+    25%{transform:translateX(-4px)}
+    75%{transform:translateX(4px)}
+  }
+  .term-bar{display:flex;align-items:center;justify-content:space-between;
+    padding:10px 12px;background:#141b26}
+  .term-close{border:none;background:#2b3444;color:#cbd5e1;width:34px;height:34px;
+    border-radius:8px;font-size:14px;cursor:pointer}
+  .term-enter{border:none;background:#16a34a;color:#fff;font-weight:800;font-size:15px;
+    padding:9px 20px;border-radius:10px;cursor:pointer;letter-spacing:1px}
+  .term-enter:active{transform:translateY(1px)}
+
+  .err{max-width:640px;background:#fff3f0;border:2px solid #e0857a;color:#8a3b30;
+    border-radius:12px;padding:12px 14px;font-size:13px;line-height:1.7;margin-top:10px;display:none}
+  code{background:#0000000d;padding:1px 5px;border-radius:5px}
+</style>
+
+<!-- 頁首：排版比照「護理排班」的 navbar -->
+<nav class="gnav">
+  <div class="gnav-l">
+    <span class="gnav-brand">學習系統</span>
+    <span class="gnav-name" id="whoami-name"></span>
+    <!-- 未登入（本機開發）才出現的帳號切換 -->
+    <select id="user" class="gnav-devuser" style="display:none">
+      <option value="nurse_a">護理師 A</option>
+      <option value="nurse_b">護理師 B</option>
+      <option value="guest">訪客</option>
+    </select>
+  </div>
+  <div class="gnav-r">
+    <!-- 開發模式：按鍵式，僅管理員（或未登入的本機開發）看得到 -->
+    <button class="xbtn xbtn-gray" id="dev" style="display:none">開發模式</button>
+    <button class="xbtn xbtn-redsoft" id="reset">清除存檔</button>
+    <button class="xbtn xbtn-gray" id="home" style="display:none">回首頁</button>
+    <button class="xbtn xbtn-gray" id="logout" style="display:none">登出</button>
+  </div>
+</nav>
+
+<main class="gwrap">
+  <h1>主線任務</h1>
+
+  <div id="stage">
+    <div id="scene"><div class="loading">載入中…</div></div>
+    <!-- 對話框會由 Dialogue.js 疊在這裡 -->
+  </div>
+
+  <div id="inv"></div>
+
+  <div class="err" id="err"></div>
+</main>
+
+<script type="module">
+  import { Game } from "./js/Game.js";
+  import { ApiSaveAdapter } from "./js/ApiSaveAdapter.js";
+  import { MessageBoard } from "./js/MessageBoard.js";
+
+  const errEl = document.getElementById("err");
+  const userSel = document.getElementById("user");
+
+  async function loadJson(path) {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error(path + " → HTTP " + res.status);
+    return res.json();
+  }
+
+  // 判斷登入狀態：排班系統登入後會把 token / user 存在 localStorage。
+  function getAuth() {
+    try {
+      const token = localStorage.getItem("token");
+      const user = JSON.parse(localStorage.getItem("user") || "null");
+      if (token && user && user.uid)
+        return { token, uid: user.uid, name: user.name || user.uid, role: user.role || "" };
+    } catch {}
+    return null;
+  }
+
+  // 與前端 auth.ts 的 isAdmin 一致
+  const isAdmin = (role) => ["admin", "superadmin", "dual"].includes(role);
+
+  // 抓後台編輯過的文字（對話/道具）。6 秒逾時；連不到就回 null（用內建預設）。
+  async function fetchContent() {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(apiBase() + "/game/content", { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (r.ok) return (await r.json()).data;
+    } catch { /* 後端連不到 → null */ }
+    return null;
+  }
+
+  // 把後台文字套到已在跑的遊戲上（對話/道具都是即時讀取，換 reference 即生效）
+  function applyContent(game, data) {
+    if (!data) return;
+    if (data.dialogues) game.dialogue.dialogues = data.dialogues;
+    if (data.items) { game.inventory.items = data.items; game.inventory.render(); }
+  }
+
+  // 後端網址：優先用前端 api.ts 登入時寫進 localStorage 的 "apiBase"；
+  // 沒有的話，本機用 localhost:8000，正式環境直接用 Railway 後端（保底，
+  // 避免舊快取的前端 bundle 沒寫 apiBase 導致「載入存檔失敗」）。
+  const PROD_API = "https://web-production-e9f2a5.up.railway.app";
+  function apiBase() {
+    const saved = localStorage.getItem("apiBase");
+    if (saved && saved.startsWith("https://")) return saved;
+    if (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+      return saved || "http://localhost:8000";
+    return PROD_API;
+  }
+
+  async function main() {
+    let scenes, dialogues, items;
+    try {
+      [scenes, dialogues, items] = await Promise.all([
+        loadJson("./data/scenes.json"),
+        loadJson("./data/dialogues.json"),
+        loadJson("./data/items.json"),
+      ]);
+    } catch (e) {
+      errEl.style.display = "block";
+      errEl.innerHTML = "讀取資料檔失敗：" + e.message +
+        "<br>請用本機伺服器或部署後的網址開啟（不能用 file:// 直接開）。";
+      return;
+    }
+
+    const auth = getAuth();
+    let adapter, userId;
+
+    if (auth) {
+      // 已登入：存雲端（後端 → Supabase），帳號＝登入者
+      adapter = new ApiSaveAdapter(apiBase());
+      userId = auth.uid;
+      document.getElementById("whoami-name").textContent = auth.name;
+
+      const home = document.getElementById("home");
+      home.style.display = "";
+      home.onclick = () => { window.location.href = "/home"; };
+
+      const logout = document.getElementById("logout");
+      logout.style.display = "";
+      logout.onclick = () => {
+        localStorage.removeItem("token");   // 與前端 auth.ts 的 clearAuth 一致
+        localStorage.removeItem("user");
+        window.location.href = "/login";
+      };
+
+      // 開發模式僅管理員可見
+      if (isAdmin(auth.role)) document.getElementById("dev").style.display = "";
+    } else {
+      // 未登入（本機開發）：存 localStorage，可切換測試帳號，開發模式也開放
+      adapter = undefined; // Game 會用預設 LocalSaveAdapter
+      userId = userSel.value;
+      userSel.style.display = "";
+      document.getElementById("dev").style.display = "";
+    }
+
+    // 留言板（疊在舞台上）；未登入 auth=null，面板會提示先登入
+    const messageBoard = new MessageBoard({
+      mount: document.getElementById("stage"),
+      apiBase: apiBase(),
+      auth: auth ? { token: auth.token, name: auth.name } : null,
+    });
+
+    const game = new Game({
+      sceneMount: document.getElementById("scene"),
+      dialogMount: document.getElementById("stage"),
+      invMount: document.getElementById("inv"),
+      scenes, dialogues, items,
+      userId,
+      adapter,
+      messageBoard,
+      startItems: ["staff_card"],   // 每個帳號內建：職員證
+      imageBase: "assets/",
+    });
+
+    // 後台文字（/game/content）與存檔（game.init）「並行」載入：
+    // 內容不阻塞開場，回來再套用；如此進場只需等讀存檔，不會兩次等後端。
+    fetchContent().then((data) => applyContent(game, data));
+
+    try {
+      await game.init();
+    } catch (e) {
+      errEl.style.display = "block";
+      errEl.innerHTML = "載入存檔失敗：" + e.message;
+      return;
+    }
+
+    // 本機開發才用得到的帳號切換
+    if (!auth) {
+      userSel.addEventListener("change", (e) => game.switchUser(e.target.value));
+    }
+    // 開發模式：按鍵式開關，開啟時按鍵變藍（.on）
+    let devOn = false;
+    document.getElementById("dev").addEventListener("click", (e) => {
+      devOn = !devOn;
+      game.setDevMode(devOn);
+      e.currentTarget.classList.toggle("on", devOn);
+    });
+    document.getElementById("reset").addEventListener("click", () => {
+      if (confirm("確定清除存檔並重新開始？")) game.resetProgress();
+    });
+
+    window.game = game; // 方便 console 測試
+  }
+
+  main();
+</script>

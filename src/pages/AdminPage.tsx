@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef, Fragment } from "react";
-import { useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
-import * as XLSX from "xlsx";
 import api from "../api";
 import { getAuth, clearAuth } from "../auth";
 
@@ -29,14 +27,18 @@ const DEFAULT_OFF: ShiftDef[] = [
 const ROLE_ABBR:   Record<string,string> = { nurse:"護", dual:"兼", admin:"管", superadmin:"超" };
 
 // ─── Types
-type Tab = "schedule"|"users"|"cycle"|"rules"|"shifts_cfg"|"generate"|"logs";
+type Tab = "schedule"|"users"|"cycle"|"rules"|"shifts_cfg"|"generate"|"logs"|"home_modules";
 
 interface ShiftDef { code: string; label: string; type: "work"|"rest"|"off"; admin_only?: boolean; }
 interface User {
   uid: string; name: string; role: string; level: string;
-  attr: string; halftime: boolean; note: string; sort_order: number;
+  attr: string; halftime: boolean; admin_staff: boolean;
+  is_trainee: boolean; mentor_uid: string; note: string; sort_order: number;
 }
 interface ShiftRow { nurse_uid: string; date: string; shift: string; confirmed?: boolean; updated_by?: string; }
+
+// 行政人員勾選時，輪班屬性/角色/層級等下拉呈現灰色不可選
+const disabledSelStyle: React.CSSProperties = { background:"#f3f4f6", color:"#9ca3af", cursor:"not-allowed" };
 
 function isOff(code: string, offShifts: ShiftDef[]) { return offShifts.some(s => s.code === code); }
 function attrShort(attr: string): string {
@@ -236,7 +238,6 @@ function SwipeRangePopup({
 
 // ─── 主頁面
 export default function AdminPage() {
-  const nav = useNavigate();
   const user = getAuth()!;
   const isSuperAdmin = user.role === "superadmin";
   const isDual = user.role === "dual";
@@ -262,7 +263,8 @@ export default function AdminPage() {
   const [saving, setSaving] = useState<Set<string>>(new Set());
   const [confirmingAll, setConfirmingAll] = useState(false);
   const [confirmEdit, setConfirmEdit] = useState<{ nurseUid: string; date: string; nurseName: string } | null>(null);
-  const [revertConfirm, setRevertConfirm] = useState(false);
+  const [revertMenuOpen, setRevertMenuOpen] = useState(false);
+  const [revertConfirm, setRevertConfirm] = useState<"clear" | "clearCycle" | "restore" | "restoreManual" | "purge" | null>(null);
   const [reverting, setReverting] = useState(false);
   const [revertResult, setRevertResult] = useState<string>("");
 
@@ -293,9 +295,67 @@ export default function AdminPage() {
   const [scrollSpeed, setScrollSpeed] = useState<number>(() => Number(localStorage.getItem('scrollSpeed') ?? 10));
   const autoScrollFrameRef = useRef<number | null>(null);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
+  const apTabsRef = useRef<HTMLDivElement | null>(null);         // 頁籤列（量測浮動表頭起始 Y）
+  const apTheadRowRef = useRef<HTMLTableRowElement | null>(null); // 表頭日期列（量測欄寬）
+  const apStickyScrollRef = useRef<HTMLDivElement | null>(null);  // 浮動表頭橫向捲動容器
+  const [apShowStickyHdr, setApShowStickyHdr] = useState(false);
+  const [apColWidths, setApColWidths] = useState<number[]>([]);
+  const [apStickyBox, setApStickyBox] = useState<{ left: number; width: number; top: number }>({ left: 0, width: 0, top: 96 });
   const nurseUsersRef = useRef<User[]>([]);
   const scrollSpeedRef = useRef<number>(10);
   useEffect(() => { scrollSpeedRef.current = scrollSpeed; }, [scrollSpeed]);
+
+  // 桌機滑鼠拖曳捲動班表（按住拖曳：左右捲表格容器、上下捲整個頁面；拖曳時不觸發格子點選）
+  // 橫向用 pageX 捲 wrap.scrollLeft；縱向用 clientY（視窗相對，避免頁面捲動造成座標回饋）捲 window。
+  const dragScrollRef = useRef({ down: false, startX: 0, startScroll: 0, startY: 0, startScrollTop: 0, moved: false });
+  const suppressClickRef = useRef(false);
+  useEffect(() => {
+    if (tab !== "schedule") return;
+    const wrap = tableWrapRef.current;
+    if (!wrap) return;
+    const onDown = (e: MouseEvent) => {
+      if (e.button !== 0) return;                 // 只處理左鍵
+      suppressClickRef.current = false;
+      dragScrollRef.current = {
+        down: true, moved: false,
+        startX: e.pageX, startScroll: wrap.scrollLeft,
+        startY: e.clientY, startScrollTop: window.scrollY,
+      };
+    };
+    const onMove = (e: MouseEvent) => {
+      const s = dragScrollRef.current;
+      if (!s.down) return;
+      const dx = e.pageX - s.startX;
+      const dy = e.clientY - s.startY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) { s.moved = true; wrap.style.cursor = "grabbing"; }
+      if (s.moved) {
+        wrap.scrollLeft = s.startScroll - dx;                       // 左右捲表格
+        window.scrollTo(window.scrollX, s.startScrollTop - dy);     // 上下捲頁面
+        e.preventDefault();
+      }
+    };
+    const onUp = () => {
+      const s = dragScrollRef.current;
+      if (s.down && s.moved) suppressClickRef.current = true;   // 剛拖曳過 → 吞掉接下來的 click
+      s.down = false;
+      wrap.style.cursor = "grab";
+    };
+    const onClickCapture = (e: MouseEvent) => {
+      if (suppressClickRef.current) { e.stopPropagation(); e.preventDefault(); suppressClickRef.current = false; }
+    };
+    wrap.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    wrap.addEventListener("click", onClickCapture, true);       // capture 階段先攔
+    wrap.style.cursor = "grab";
+    return () => {
+      wrap.removeEventListener("mousedown", onDown);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      wrap.removeEventListener("click", onClickCapture, true);
+      wrap.style.cursor = "";
+    };
+  }, [tab]);
   useEffect(() => { ctrlSelectedRef.current = ctrlSelected; }, [ctrlSelected]);
   useEffect(() => { shiftRangeRef.current = shiftRange; }, [shiftRange]);
   useEffect(() => { scheduleRef.current = schedule; }, [schedule]);
@@ -303,7 +363,7 @@ export default function AdminPage() {
   useEffect(() => { batchSaveRef.current = batchSave; });
 
   // 帳號管理
-  const [newUser, setNewUser] = useState({ uid:"", password:"", name:"", role:"nurse", level:"member", attr:"輪班DEN", halftime:false, note:"" });
+  const [newUser, setNewUser] = useState({ uid:"", password:"", name:"", role:"nurse", level:"member", attr:"輪班DEN", halftime:false, admin_staff:false, is_trainee:false, mentor_uid:"", note:"" });
   const [creating, setCreating] = useState(false);
   const [showNewPwd, setShowNewPwd] = useState(false);
   const [editUser, setEditUser] = useState<User | null>(null);
@@ -348,6 +408,7 @@ export default function AdminPage() {
     weekly_max_off_total: 3,       // 規則7：含指定休每週上限
     one_in_seven: true,            // 規則8：一例一休（每週≥2天休）
     lock_designated_off: true,     // 規則10：指定休不可覆蓋
+    allow_fixed_deviation: true,   // 固定班可偏離最多2格；未勾＝完全不可偏離
     notes: "",
   });
 
@@ -362,6 +423,19 @@ export default function AdminPage() {
   // 個別護理師比例覆蓋
   type RatioOverride = { nurse_uid: string; ratio: Record<string, number> };
   const [ratioOverrides, setRatioOverrides] = useState<RatioOverride[]>([]);
+  // 已儲存快照（一鍵生成頁籤只顯示已寫入資料庫的值，避免誤以為已儲存）
+  const [savedCycle, setSavedCycle] = useState<typeof cycle | null>(null);
+  const [savedRules, setSavedRules] = useState<typeof rulesForm | null>(null);
+  // 登入畫面自訂（空字串＝用預設）
+  // 首頁模組卡片自訂（大標/小標/圖片可改；卡片本身與可否點擊由程式控制）
+  const DEFAULT_MODULE_META = [
+    { key: "schedule", title: "排班系統", tagline: "不來預班就沒得預班囉～" },
+    { key: "data",     title: "學習系統", tagline: "護理訓練小遊戲" },
+  ];
+  const [moduleCfgs, setModuleCfgs] = useState<{ key: string; title: string; tagline: string; image: string }[]>(
+    DEFAULT_MODULE_META.map(d => ({ ...d, image: "" }))
+  );
+  const [savingModules, setSavingModules] = useState(false);
   // 帳號管理：attr 變更提示
   const [attrChangeWarn, setAttrChangeWarn] = useState<{ uid: string; oldAttr: string; newAttr: string } | null>(null);
   const [deleteShiftTarget, setDeleteShiftTarget] = useState<{type:"work"|"rest"|"off"; idx:number; code:string} | null>(null);
@@ -378,16 +452,28 @@ export default function AdminPage() {
   // Generate tab state（必須在頂層，不可放 IIFE 內）
   const [generating, setGenerating] = useState(false);
   const [genResult, setGenResult] = useState<string>("");
-  const [genWarnings, setGenWarnings] = useState<string[]>([]);
-  const [genAnomalies, setGenAnomalies] = useState<string[]>([]);
-  const [overwriteConfirmed, setOverwriteConfirmed] = useState(false);
+  const [genDemand, setGenDemand] = useState<{ daily_d:number; daily_e:number; daily_n:number; special_dates_count:number; total_work_demand:number } | null>(null);
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
-  const [pendingSchedule, setPendingSchedule] = useState<{
+  const GEN_PROFILES = [
+    { key: "balanced", label: "分數最高版", desc: "整體懲罰總分最低（預設平衡權重）" },
+    { key: "smooth",   label: "順班優先版", desc: "切換懲罰加倍，連班更整齊" },
+    { key: "fair",     label: "公平優先版", desc: "比例／休假公平懲罰加倍，各班種分配更平均；固定班嚴格（固定D只排D，完全不可偏離，湊不出則此版失敗）" },
+  ] as const;
+  type GenProfileKey = typeof GEN_PROFILES[number]["key"];
+  type GenVersion = {
     schedules: Record<string, Record<string, string>>;
     cycle_dates: string[];
-    overwrite_confirmed: boolean;
-  } | null>(null);
+    message: string;
+    warnings: string[];
+    anomalies: string[];
+    prefill_warnings: string[];
+    metrics: { switches: number; excess_switches?: number; isolated_days: number; max_ratio_dev: number } | null;
+    error?: string;
+  };
+  const [genVersions, setGenVersions] = useState<Partial<Record<GenProfileKey, GenVersion>>>({});
+  const [selectedProfile, setSelectedProfile] = useState<GenProfileKey | null>(null);
+  const [warnOpen, setWarnOpen] = useState<Record<string, boolean>>({});   // 版本卡「警告」展開狀態
   const [committing, setCommitting] = useState(false);
   const [commitResult, setCommitResult] = useState<string>("");
 
@@ -397,7 +483,9 @@ export default function AdminPage() {
   // 週期相關計算
   const cycleIsSet = !!(cycle.start_date && cycle.end_date);
   const fullTimeOff = Math.min(8 + cycle.holiday_days, 13);
-  const partTimeOff = Math.min(16 + cycle.holiday_days, 21);
+  const partTimeWork = Math.floor((160 - cycle.holiday_days * 8) / 2 / 8);      // 可上天數（無條件捨去）
+  const partTimeOffExact = 28 - (160 - cycle.holiday_days * 8) / 2 / 8;         // 顯示用（可能有小數）
+  const partTimeOff = 28 - partTimeWork;                                          // 計算用（整數）
   const DOW_ZH = ["週日","週一","週二","週三","週四","週五","週六"];
   const cycleTitleLabel = cycleIsSet
     ? (() => {
@@ -434,6 +522,8 @@ export default function AdminPage() {
   // 只顯示護理師角色
   const nurseUsers = users.filter(u => ["nurse","dual"].includes(u.role));
   nurseUsersRef.current = nurseUsers;
+  // 實際參與排班的護理師（排除行政人員 admin_staff，他們只預班、不被一鍵生成）
+  const schedulableNurses = nurseUsers.filter(u => !u.admin_staff);
 
   // 每日休假人數（只算週期內）
   const dailyOff: Record<string,number> = {};
@@ -447,6 +537,51 @@ export default function AdminPage() {
   useEffect(() => { fetchUsers(); fetchRules(); }, []);
   useEffect(() => { if (tab==="schedule") fetchSchedule(); }, [tab, ym, cycle.start_date, cycle.end_date]);
   useEffect(() => { if (tab==="logs") fetchLogs(); }, [tab]);
+
+  // ── 浮動日期表頭：量測欄寬 + 表格容器左緣/寬度（避免錯位）
+  useEffect(() => {
+    const measure = () => {
+      const row = apTheadRowRef.current;
+      if (!row) return;
+      const ths = Array.from(row.querySelectorAll("th"));
+      if (!ths.length || ths[0].getBoundingClientRect().width === 0) return;
+      setApColWidths(ths.map(th => th.getBoundingClientRect().width));
+      const wrap = tableWrapRef.current;
+      const tabs = apTabsRef.current;
+      if (wrap) {
+        const r = wrap.getBoundingClientRect();
+        const top = tabs ? tabs.getBoundingClientRect().bottom : 96;
+        setApStickyBox({ left: r.left, width: r.width, top });
+      }
+    };
+    measure();
+    window.addEventListener("resize", measure, { passive: true });
+    return () => window.removeEventListener("resize", measure);
+  }, [tab, schedule, nurseUsers, cycle.start_date, cycle.end_date]);
+
+  // ── 監聽垂直捲動：表頭捲過頁籤列後顯示浮動表頭
+  useEffect(() => {
+    const onScroll = () => {
+      const row = apTheadRowRef.current;
+      const tabs = apTabsRef.current;
+      if (!row || !tabs) { setApShowStickyHdr(false); return; }
+      const threshold = tabs.getBoundingClientRect().bottom;
+      setApShowStickyHdr(row.getBoundingClientRect().bottom <= threshold);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [tab]);
+
+  // ── 同步水平捲動：表格 → 浮動表頭
+  useEffect(() => {
+    const wrap = tableWrapRef.current;
+    const sticky = apStickyScrollRef.current;
+    if (!wrap || !sticky) return;
+    const onScroll = () => { sticky.scrollLeft = wrap.scrollLeft; };
+    wrap.addEventListener("scroll", onScroll, { passive: true });
+    return () => wrap.removeEventListener("scroll", onScroll);
+  }, [apShowStickyHdr]);
 
   // 手機長按拖曳：React onTouchStart 在 span 上啟動計時，
   // 長按觸發後才動態掛 non-passive 的 document.touchmove 阻止頁面捲動。
@@ -681,12 +816,14 @@ export default function AdminPage() {
           months.add(cur.format("YYYY-MM"));
           cur = cur.add(1,'month');
         }
-        const allRows: ShiftRow[] = [];
-        for (const m of months) {
-          const y = parseInt(m.slice(0,4)), mo = parseInt(m.slice(5,7));
-          const { data } = await api.get("/schedule", { params: { year: y, month: mo } });
-          allRows.push(...(data.schedule ?? []));
-        }
+        // 平行抓取所有月份，加快載入
+        const results = await Promise.all(
+          Array.from(months).map(m => {
+            const y = parseInt(m.slice(0,4)), mo = parseInt(m.slice(5,7));
+            return api.get("/schedule", { params: { year: y, month: mo } });
+          })
+        );
+        const allRows: ShiftRow[] = results.flatMap(r => r.data.schedule ?? []);
         setSchedule(allRows);
       } else {
         const { data } = await api.get("/schedule", { params: { year, month } });
@@ -712,23 +849,61 @@ export default function AdminPage() {
       const r = data.rules ?? {};
       setAllRules(r);
       if (r.cycle) {
-        setCycle(prev => ({
-          ...prev,
-          ...r.cycle,
-          period_days: r.cycle.period_days ?? (
-            r.cycle.start_date && r.cycle.end_date
-              ? Math.max(1, dayjs(r.cycle.end_date).diff(dayjs(r.cycle.start_date),'day') + 1)
-              : prev.period_days
-          ),
-        }));
+        setCycle(prev => {
+          const merged = {
+            ...prev,
+            ...r.cycle,
+            period_days: r.cycle.period_days ?? (
+              r.cycle.start_date && r.cycle.end_date
+                ? Math.max(1, dayjs(r.cycle.end_date).diff(dayjs(r.cycle.start_date),'day') + 1)
+                : prev.period_days
+            ),
+          };
+          setSavedCycle(merged);
+          return merged;
+        });
       }
-      if (r.scheduling) setRulesForm(prev => ({ ...prev, ...r.scheduling }));
+      if (r.scheduling) {
+        setRulesForm(prev => {
+          const merged = { ...prev, ...r.scheduling };
+          setSavedRules(merged);
+          return merged;
+        });
+      }
       if (r.ratio) setRatioForm(prev => ({ ...prev, ...r.ratio }));
       if (r.ratio_overrides) setRatioOverrides(r.ratio_overrides);
       if (r.shifts?.work) { setWorkShifts(r.shifts.work); setEditWorkShifts(r.shifts.work); }
       if (r.shifts?.rest) { setRestShifts(r.shifts.rest); setEditRestShifts(r.shifts.rest); }
       if (r.shifts?.off)  { setOffShifts(r.shifts.off);  setEditOffShifts(r.shifts.off);   }
+      if (r.modules) {
+        const saved: Record<string, any> = Object.fromEntries((r.modules as any[]).map(m => [m.key, m]));
+        setModuleCfgs(DEFAULT_MODULE_META.map(d => ({
+          key: d.key,
+          title: saved[d.key]?.title ?? d.title,
+          tagline: saved[d.key]?.tagline ?? d.tagline,
+          image: saved[d.key]?.image ?? "",
+        })));
+      }
     } catch {}
+  }
+
+
+  async function saveModuleConfig() {
+    setSavingModules(true);
+    try {
+      // 學習系統卡片改由「學習系統後台」管理，這裡只送非 data 模組（後端依 key 合併）
+      await api.post("/rules", { rules: { modules: moduleCfgs.filter(m => m.key !== "data") } });
+      showToast("✓ 首頁模組已儲存");
+    } catch (err: any) {
+      showToast("✗ " + (err.response?.data?.detail ?? err.message ?? "儲存失敗"), false);
+    } finally { setSavingModules(false); }
+  }
+
+  function onModuleImagePick(key: string, file: File) {
+    if (file.size > 800 * 1024) { showToast("✗ 圖片請小於 800KB", false); return; }
+    const reader = new FileReader();
+    reader.onload = () => setModuleCfgs(p => p.map(m => m.key === key ? { ...m, image: String(reader.result) } : m));
+    reader.readAsDataURL(file);
   }
 
   function showToast(msg: string, ok = true) {
@@ -737,38 +912,39 @@ export default function AdminPage() {
     toastRef.current = setTimeout(() => setToast({ msg:"", ok:true }), 2500);
   }
 
-  // ── 班表操作
-  async function updateShift(nurse_uid: string, date: string, shift: string | null) {
-    console.log("[updateShift] called:", { nurse_uid, date, shift });
+  // ── 單格 debounce 佇列
+  const pendingSingle = useRef<Map<string, { nurse_uid: string; date: string; shift: string | null }>>(new Map());
+  const singleTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function flushSingle() {
+    if (!pendingSingle.current.size) return;
+    const updates = Array.from(pendingSingle.current.values());
+    pendingSingle.current.clear();
+    singleTimer.current = null;
+    _batchCommit(updates);
+  }
+
+  // ── 班表操作（樂觀更新 + debounce 500ms）
+  function updateShift(nurse_uid: string, date: string, shift: string | null) {
     if (!nurse_uid || !date) {
-      console.error("[updateShift] missing nurse_uid or date");
       showToast("✗ 資料錯誤：缺少護理師或日期", false);
       return;
     }
     const key = `${nurse_uid}_${date}`;
+    // 立即更新畫面（樂觀更新）
     setSchedule(cur => {
       const f = cur.filter(r => !(r.nurse_uid===nurse_uid && r.date===date));
       if (shift) f.push({ nurse_uid, date, shift, confirmed: false, updated_by: user.uid });
       return f;
     });
     setSaving(s => new Set(s).add(key));
-    try {
-      console.log("[updateShift] POST /schedule/shift →", { nurse_uid, date, shift });
-      const res = await api.post("/schedule/shift", { nurse_uid, date, shift });
-      console.log("[updateShift] success:", res.data);
-      showToast("✓ 已儲存");
-    } catch (err: any) {
-      const detail = err.response?.data?.detail ?? err.message ?? "無法連線到伺服器";
-      console.error("[updateShift] error:", err.response?.status, detail, err);
-      showToast(`✗ 儲存失敗（${err.response?.status ?? "網路錯誤"}）：${detail}`, false);
-      // 從伺服器重新載入實際狀態，避免 UI 與 DB 不一致
-      await fetchSchedule();
-    } finally {
-      setSaving(s => { const n = new Set(s); n.delete(key); return n; });
-    }
+    // 加入 debounce 佇列
+    pendingSingle.current.set(key, { nurse_uid, date, shift });
+    if (singleTimer.current) clearTimeout(singleTimer.current);
+    singleTimer.current = setTimeout(flushSingle, 500);
   }
 
-  // ── 批次儲存（Shift/Ctrl/滑動共用，shift=null 表示清除）
+  // ── 批次儲存（Shift/Ctrl/滑動共用）— 一次 API
   async function batchSave(updates: Array<{ nurse_uid: string; date: string; shift: string | null }>) {
     if (!updates.length) return;
     const deduped = Array.from(
@@ -785,23 +961,25 @@ export default function AdminPage() {
     });
     const keys = deduped.map(u => `${u.nurse_uid}_${u.date}`);
     setSaving(s => { const n = new Set(s); keys.forEach(k => n.add(k)); return n; });
-    let failed = false;
+    await _batchCommit(deduped, keys);
+  }
+
+  // ── 實際發送 batch API（供 updateShift debounce 和 batchSave 共用）
+  async function _batchCommit(
+    updates: Array<{ nurse_uid: string; date: string; shift: string | null }>,
+    knownKeys?: string[],
+  ) {
+    const keys = knownKeys ?? updates.map(u => `${u.nurse_uid}_${u.date}`);
     try {
-      // 循序執行避免並行 INSERT unique 衝突
-      for (const u of deduped) {
-        await api.post("/schedule/shift", u);
-      }
-      showToast(`✓ 已儲存 ${deduped.length} 格`);
+      await api.post("/schedule/shifts/batch", updates);
+      if (updates.length === 1) showToast("✓ 已儲存");
+      else showToast(`✓ 已儲存 ${updates.length} 格`);
     } catch (err: any) {
-      failed = true;
       const detail = err.response?.data?.detail ?? err.message ?? "網路錯誤";
       showToast(`✗ 儲存失敗：${detail}`, false);
+      await fetchSchedule();   // 回滾：重新載入真實狀態
     } finally {
       setSaving(s => { const n = new Set(s); keys.forEach(k => n.delete(k)); return n; });
-    }
-    if (failed) {
-      // 從伺服器重新載入，避免 UI 與 DB 不一致
-      await fetchSchedule();
     }
   }
 
@@ -827,7 +1005,7 @@ export default function AdminPage() {
     try {
       await api.post("/users", newUser);
       showToast("✓ 帳號建立成功");
-      setNewUser({ uid:"", password:"", name:"", role:"nurse", level:"member", attr:"輪班", halftime:false, note:"" });
+      setNewUser({ uid:"", password:"", name:"", role:"nurse", level:"member", attr:"輪班DEN", halftime:false, admin_staff:false, is_trainee:false, mentor_uid:"", note:"" });
       fetchUsers();
     } catch (err: any) {
       showToast("✗ " + (err.response?.data?.detail ?? "建立失敗"), false);
@@ -1085,6 +1263,7 @@ export default function AdminPage() {
   async function saveCycle() {
     try {
       await api.post("/rules", { rules: { cycle } });
+      setSavedCycle(cycle);   // 儲存成功後才更新一鍵生成頁籤顯示的快照
       showToast("✓ 週期設定已儲存");
     } catch (err: any) {
       const msg = err.response?.data?.detail ?? err.response?.statusText ?? err.message ?? "儲存失敗";
@@ -1094,6 +1273,7 @@ export default function AdminPage() {
   async function saveSchedulingRules() {
     try {
       await api.post("/rules", { rules: { scheduling: rulesForm, ratio: ratioForm, ratio_overrides: ratioOverrides } });
+      setSavedRules(rulesForm);   // 儲存成功後才更新一鍵生成頁籤顯示的快照
       showToast("✓ 排班規則已儲存");
     } catch (err: any) {
       showToast(`✗ ${err.response?.data?.detail ?? err.message ?? "儲存失敗"}`, false);
@@ -1108,6 +1288,23 @@ export default function AdminPage() {
     if (attr === "輪班DN") return ["D","N"];
     if (attr === "輪班DEN") return ["D","E","N"];
     return [];
+  }
+
+  // 判斷班別是否與護理師輪班屬性不符（固定班用屬性名稱比對）
+  function isAttrConflict(shift: string, attr: string): boolean {
+    if (!shift) return false;
+    // 應休類（OFF、半）和放假/調整類（V、員、喪⋯）不觸發衝突
+    if (allOffShifts.some(s => s.code === shift)) return false;
+    if (restShifts.some(s => s.code === shift)) return false;
+    // 會/公/書記 性質等同 D
+    const effectiveShift = ["會", "公", "書記"].includes(shift) ? "D" : shift;
+    if (attr.startsWith("固定")) {
+      const fixedShift = attr.replace("固定", "");
+      return effectiveShift !== fixedShift;
+    }
+    const allowed = attrShifts(attr);
+    if (allowed.length === 0) return false; // 未知屬性，不標示
+    return !allowed.includes(effectiveShift);
   }
 
   function isRotationAttr(attr: string) { return attr.startsWith("輪班"); }
@@ -1201,12 +1398,17 @@ export default function AdminPage() {
   }
 
   // ── 格子樣式（nurseUid: 判斷 updated_by 是否為本人 → 綠色；否則 → 藍色）
-  function cellStyle(shift: string|undefined, confirmed: boolean|undefined, saving: boolean, nurseUid?: string, updatedBy?: string): { cls: string; style: React.CSSProperties } {
+  function cellStyle(shift: string|undefined, confirmed: boolean|undefined, saving: boolean, nurseUid?: string, updatedBy?: string, attrConflict?: boolean): { cls: string; style: React.CSSProperties } {
     let cls = "ap-cell";
     let style: React.CSSProperties = {};
     if (saving) { cls += " is-saving"; }
     else if (!shift) { cls += " is-empty"; }
-    else {
+    else if (attrConflict) {
+      // 屬性衝突：黃色底色警告
+      style = confirmed
+        ? { background:"#854d0e", borderColor:"#713f12", color:"#fff" }
+        : { background:"#fef9c3", borderColor:"#eab308", color:"#713f12" };
+    } else {
       const isNurseFilled = !!updatedBy && !!nurseUid && updatedBy === nurseUid;
       if (isNurseFilled) {
         style = confirmed
@@ -1228,6 +1430,7 @@ export default function AdminPage() {
     { key:"generate",   label:"一鍵生成" },
     { key:"users",      label:"帳號管理" },
     { key:"shifts_cfg", label:"班別設定" },
+    { key:"home_modules", label:"首頁模組" },
     { key:"logs",       label:"操作紀錄" },
   ];
 
@@ -1235,7 +1438,8 @@ export default function AdminPage() {
     <div className="ap-root">
       <style>{`
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { background: #f1f5f9 !important; color-scheme: light !important; overflow-x: hidden; }
+        html, body { background: #f1f5f9 !important; color-scheme: light !important; }
+        html { overflow-x: hidden; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft JhengHei", sans-serif; color: #111827; font-size: 14px; }
 
         /* Navbar */
@@ -1266,7 +1470,7 @@ export default function AdminPage() {
         .ap-tab:hover:not(.active) { color: #374151; background: #f8fafc; }
 
         /* Layout */
-        .ap-root { overflow-x: hidden; max-width: 100vw; box-sizing: border-box; }
+        .ap-root { max-width: 100vw; box-sizing: border-box; }
         .ap-body { max-width: 1400px; margin: 0 auto; padding: 20px 16px 80px; box-sizing: border-box; width: 100%; }
         .card { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; box-sizing: border-box; width: 100%; }
         .card-head { padding: 16px 20px 12px; border-bottom: 1px solid #f3f4f6; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
@@ -1304,6 +1508,10 @@ export default function AdminPage() {
         .finput:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
         .finput-sm { padding: 6px 9px; font-size: 13px; }
         select.finput { cursor: pointer; }
+        /* 日期/時間欄位恢復原生選擇器圖示（時鐘/日曆），可點選 */
+        input[type="date"].finput, input[type="time"].finput { -webkit-appearance: auto; appearance: auto; min-width: 0; }
+        input[type="date"].finput::-webkit-calendar-picker-indicator,
+        input[type="time"].finput::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; }
         .fcheck { display: flex; align-items: center; gap: 8px; }
         .fcheck input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #2563eb; }
 
@@ -1317,7 +1525,7 @@ export default function AdminPage() {
         /* 班表格子 */
         .ap-cell {
           display: inline-flex; align-items: center; justify-content: center;
-          width: 36px; height: 28px; border-radius: 5px;
+          width: 36px; height: 30px; border-radius: 6px;
           font-size: 12px; font-weight: 700; cursor: pointer;
           border: 1.5px solid transparent;
           transition: background .1s, opacity .15s;
@@ -1338,6 +1546,7 @@ export default function AdminPage() {
           position: sticky; left: 0; z-index: 2;
           background: #fff;
           white-space: nowrap;
+          width: 70px; min-width: 70px;
         }
         .sticky-name-head {
           background: #f8fafc !important;
@@ -1345,26 +1554,27 @@ export default function AdminPage() {
         }
         /* 班屬欄 */
         .sticky-attr {
-          position: sticky; left: 80px; z-index: 2;
+          position: sticky; left: 70px; z-index: 2;
           background: #fff; border-right: 2px solid #e2e8f0 !important;
           white-space: nowrap; text-align: center;
-          width: 36px; min-width: 36px;
+          width: 34px; min-width: 34px;
           font-size: 10px; font-weight: 600; color: #9ca3af;
           padding: 4px 2px;
         }
         .sticky-attr-head {
           background: #f8fafc !important;
-          position: sticky; left: 80px; z-index: 5;
+          position: sticky; left: 70px; z-index: 5;
           border-right: 2px solid #e2e8f0 !important;
-          text-align: center; font-size: 11px; font-weight: 700; color: #6b7280;
-          padding: 9px 4px; width: 36px; min-width: 36px;
+          text-align: center !important; font-size: 11px; font-weight: 700; color: #6b7280;
+          padding: 8px 4px; width: 34px; min-width: 34px;
         }
         .ap-th-day {
-          padding: 6px 2px; text-align: center; font-size: 11px; font-weight: 700;
+          padding: 6px 2px; text-align: center !important; font-size: 11px; font-weight: 700;
           color: #374151; background: #f8fafc; min-width: 42px; width: 42px;
         }
-        .ap-th-day.we { color: #dc2626; }
-        .ap-td-shift { text-align: center; padding: 2px; }
+        .ap-th-day.we { color: #dc2626; background: #fef2f2; }
+        .ap-td-shift { text-align: center; padding: 3px 2px; }
+        .ap-td-shift.we { background: #fef9f9; }
 
         /* Badge */
         .badge { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: 11px; font-weight: 700; }
@@ -1409,24 +1619,34 @@ export default function AdminPage() {
         }
 
         /* 橫向模式縮小格子 */
+        @media (max-width: 480px) {
+          .sticky-name, .sticky-name-head { width: 56px !important; min-width: 56px !important; font-size: 11px !important; padding: 6px 7px !important; }
+          .sticky-attr, .sticky-attr-head { width: 28px !important; min-width: 28px !important; font-size: 9px !important; }
+          .ap-th-day { width: 34px !important; min-width: 34px !important; }
+          .ap-cell { width: 28px !important; height: 26px !important; font-size: 11px !important; }
+        }
         @media (orientation: landscape) and (max-width: 1024px) {
           .ap-cell { width: 26px !important; height: 24px !important; font-size: 10px !important; }
           .ap-th-day { min-width: 30px !important; width: 30px !important; font-size: 9px !important; padding: 4px 1px !important; }
           .ap-td-shift { padding: 1px !important; }
-          .sticky-name { font-size: 10px !important; min-width: 50px !important; max-width: 50px !important; }
+          .sticky-name, .sticky-name-head { font-size: 12px !important; min-width: 50px !important; max-width: 50px !important; width: 50px !important; }
+          .sticky-attr, .sticky-attr-head { width: 26px !important; min-width: 26px !important; font-size: 9px !important; }
         }
 
         /* Toast */
         .ap-toast {
-          position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
-          padding: 9px 22px; border-radius: 99px; font-size: 13px; font-weight: 600;
-          z-index: 10000; pointer-events: none; white-space: nowrap;
-          box-shadow: 0 4px 16px rgba(0,0,0,.2);
+          position: fixed; bottom: 34px; left: 50%; transform: translateX(-50%);
+          padding: 11px 26px; border-radius: 12px; font-size: 16px; font-weight: 500;
+          z-index: 10000; pointer-events: none; white-space: nowrap; letter-spacing: .3px;
+          box-shadow: 0 5px 18px rgba(0,0,0,.2);
           animation: toast-up .18s ease;
         }
-        .ap-toast.ok  { background: #111827; color: #fff; }
+        .ap-toast.ok  { background: #15803d; color: #fff; }
         .ap-toast.err { background: #dc2626; color: #fff; }
-        @keyframes toast-up { from { opacity:0; transform: translateX(-50%) translateY(8px); } }
+        @keyframes toast-up { from { opacity:0; transform: translateX(-50%) translateY(10px); } }
+        @media (min-width: 768px) {
+          .ap-toast { font-size: 18px; font-weight: 600; }
+        }
 
         /* 設定頁區塊 */
         .setting-section { background: #f8fafc; border-radius: 10px; padding: 16px 18px; border: 1px solid #e5e7eb; }
@@ -1448,14 +1668,15 @@ export default function AdminPage() {
         </div>
         <div className="ap-nav-r">
           {isDual && (
-            <button className="btn btn-ghost btn-sm" onClick={() => nav("/nurse")}>👤 切換護理師介面</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { window.location.href = "/nurse"; }}>護理師介面</button>
           )}
-          <button className="btn btn-ghost btn-sm" onClick={() => { clearAuth(); nav("/login"); }}>登出</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => { window.location.href = "/home"; }}>回首頁</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => { clearAuth(); window.location.href = "/login"; }}>登出</button>
         </div>
       </nav>
 
       {/* ── Tab bar */}
-      <div className="ap-tabs">
+      <div className="ap-tabs" ref={apTabsRef}>
         {TABS.map(t => (
           <button key={t.key} className={`ap-tab${tab===t.key?" active":""}`} onClick={() => {
               if (t.key !== "users" && tab === "users" && userDirty.size > 0) {
@@ -1489,13 +1710,51 @@ export default function AdminPage() {
                 {!cycleIsSet && (
                   <input type="month" value={ym} onChange={e => setYm(e.target.value)} className="finput" style={{ width:150 }} />
                 )}
-                <button
-                  className="btn btn-gray"
-                  disabled={reverting}
-                  onClick={() => setRevertConfirm(true)}
-                  title="回復到匯入 CP-SAT 之前的預假狀態">
-                  回復到預假狀態
-                </button>
+                <div style={{ position:"relative" }}>
+                  <button
+                    className="btn btn-gray"
+                    disabled={reverting}
+                    onClick={() => setRevertMenuOpen(v => !v)}>
+                    班表還原選項 ▾
+                  </button>
+                  {revertMenuOpen && (
+                    <>
+                    <div onClick={() => setRevertMenuOpen(false)}
+                      style={{ position:"fixed", inset:0, zIndex:19 }} />
+                    <div style={{
+                      position:"absolute", top:"100%", left:0, marginTop:4, zIndex:20,
+                      background:"#fff", border:"1px solid #e5e7eb", borderRadius:8,
+                      boxShadow:"0 4px 16px rgba(0,0,0,.12)", minWidth:260, overflow:"hidden",
+                    }}>
+                      <button className="btn-menu-item" onClick={() => { setRevertMenuOpen(false); setRevertConfirm("clear"); }}
+                        style={{ display:"block", width:"100%", textAlign:"left", padding:"10px 14px", border:"none", background:"none", cursor:"pointer", fontSize:13 }}>
+                        1. 清除所有 CP-SAT 生成內容<br/>
+                        <span style={{ fontSize:11, color:"#9ca3af" }}>只留下人員填寫的內容</span>
+                      </button>
+                      <button className="btn-menu-item" onClick={() => { setRevertMenuOpen(false); setRevertConfirm("clearCycle"); }}
+                        style={{ display:"block", width:"100%", textAlign:"left", padding:"10px 14px", border:"none", borderTop:"1px solid #f3f4f6", background:"none", cursor:"pointer", fontSize:13 }}>
+                        2. 清除預班週期內所有填寫內容<br/>
+                        <span style={{ fontSize:11, color:"#9ca3af" }}>執行前自動備份，可用選項 4 還原</span>
+                      </button>
+                      <button className="btn-menu-item" onClick={() => { setRevertMenuOpen(false); setRevertConfirm("restore"); }}
+                        style={{ display:"block", width:"100%", textAlign:"left", padding:"10px 14px", border:"none", borderTop:"1px solid #f3f4f6", background:"none", cursor:"pointer", fontSize:13 }}>
+                        3. 恢復到上次 CP-SAT 生成的內容<br/>
+                        <span style={{ fontSize:11, color:"#9ca3af" }}>還原成上次一鍵生成的完整結果</span>
+                      </button>
+                      <button className="btn-menu-item" onClick={() => { setRevertMenuOpen(false); setRevertConfirm("restoreManual"); }}
+                        style={{ display:"block", width:"100%", textAlign:"left", padding:"10px 14px", border:"none", borderTop:"1px solid #f3f4f6", background:"none", cursor:"pointer", fontSize:13 }}>
+                        4. 恢復確認送出及待確認的內容<br/>
+                        <span style={{ fontSize:11, color:"#9ca3af" }}>還原到最近一次清除/還原操作之前</span>
+                      </button>
+                      <button className="btn-menu-item" onClick={() => { setRevertMenuOpen(false); setRevertConfirm("purge"); }}
+                        style={{ display:"block", width:"100%", textAlign:"left", padding:"10px 14px", border:"none", borderTop:"1px solid #f3f4f6", background:"none", cursor:"pointer", fontSize:13, color:"#dc2626" }}>
+                        5. 清除半年之外所有班表<br/>
+                        <span style={{ fontSize:11, color:"#f87171" }}>不可復原，釋放資料庫空間</span>
+                      </button>
+                    </div>
+                    </>
+                  )}
+                </div>
                 <button className="btn btn-green" onClick={confirmAll} disabled={confirmingAll}>
                   {confirmingAll ? "確認中…" : `確認送出（${schedule.filter(r=>!r.confirmed&&r.shift).length} 格待確認）`}
                 </button>
@@ -1506,7 +1765,7 @@ export default function AdminPage() {
             <div style={{ padding:"10px 20px", display:"flex", flexWrap:"wrap", gap:"8px 18px", alignItems:"center", borderBottom:"1px solid #f3f4f6", fontSize:13 }}>
               <span style={{ color:"#9ca3af", fontWeight:400 }}>共 {nurseUsers.length} 人</span>
               <span style={{ marginLeft:"auto", fontSize:12, color:"#6b7280" }}>
-                已確認 {schedule.filter(r=>cycleDays.includes(r.date)&&r.confirmed).length} 格 ／
+                已確認 {schedule.filter(r=>cycleDays.includes(r.date)&&r.confirmed&&r.shift).length} 格 ／
                 待確認 {schedule.filter(r=>cycleDays.includes(r.date)&&!r.confirmed&&r.shift).length} 格
               </span>
             </div>
@@ -1534,6 +1793,41 @@ export default function AdminPage() {
               ))}
             </div>
 
+            {/* 浮動日期表頭（表頭捲過頁籤列後固定，對齊表格容器左緣） */}
+            {apShowStickyHdr && apColWidths.length >= 2 && apStickyBox.width > 0 && (
+              <div style={{
+                position:"fixed", top:apStickyBox.top, left:apStickyBox.left, width:apStickyBox.width,
+                zIndex:90, background:"#fff", boxShadow:"0 2px 6px rgba(0,0,0,.10)", overflow:"hidden",
+              }}>
+                <div ref={apStickyScrollRef} style={{ overflowX:"auto", scrollbarWidth:"none" }}>
+                  <table className="tbl" style={{ tableLayout:"fixed", width:apColWidths.reduce((a,b)=>a+b,0) }}>
+                    <tbody>
+                      <tr>
+                        {apColWidths.map((w, i) => {
+                          if (i === 0) return <th key={i} className="sticky-name sticky-name-head" style={{ width:w, minWidth:w, padding:"9px 12px" }}>姓名</th>;
+                          if (i === 1) return <th key={i} className="sticky-attr-head" style={{ width:w, minWidth:w, left: apColWidths[0] || 70 }}>班屬</th>;
+                          const d = allDays[i-2];
+                          if (!d) return <th key={i} style={{ width:w }} />;
+                          const isRef = refDays.includes(d);
+                          const dow = dayjs(d).day();
+                          const isWe = dow===0||dow===6;
+                          return (
+                            <th key={i} className={`ap-th-day${isWe?" we":""}`}
+                              style={{ width:w, minWidth:w, background: isRef ? "#f8fafc" : undefined,
+                                       color: isRef ? "#c4c4c4" : (isWe ? "#dc2626" : undefined) }}>
+                              <div style={{ fontSize:9, opacity:.6, color: isRef?"#d1d5db":undefined }}>{String(dayjs(d).month()+1).padStart(2,"0")}</div>
+                              <div style={{ color: isRef?"#d1d5db":undefined }}>{dayjs(d).date()}</div>
+                              <div style={{ fontSize:9, opacity:.7 }}>{DOW_ZH[dow].replace("週","")}</div>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* 表格 */}
             <div ref={tableWrapRef} style={{ overflowX:"auto", WebkitOverflowScrolling:"touch", userSelect:"none", WebkitUserSelect:"none" as any }}>
               <table className="tbl">
@@ -1541,8 +1835,8 @@ export default function AdminPage() {
                   {/* 分段標題列（只在有週期時顯示） */}
                   {cycleIsSet && refDays.length > 0 && (
                     <tr>
-                      <th className="sticky-name sticky-name-head" style={{ minWidth:80, width:80 }} />
-                      <th className="sticky-attr-head" />
+                      <th className="sticky-name sticky-name-head" style={{ minWidth:70, width:70 }} />
+                      <th className="sticky-attr-head" style={{ left: apColWidths[0] || 70 }} />
                       <th colSpan={refDays.length} style={{
                         textAlign:"center", fontSize:11, fontWeight:700, padding:"4px 6px",
                         background:"#f3f4f6", color:"#9ca3af", borderBottom:"none",
@@ -1555,9 +1849,9 @@ export default function AdminPage() {
                       }}>本次排班週期（{cycle.start_date} ～ {cycle.end_date}）</th>
                     </tr>
                   )}
-                  <tr>
-                    <th className="sticky-name sticky-name-head" style={{ minWidth:80, width:80, padding:"9px 12px" }}>姓名</th>
-                    <th className="sticky-attr-head">班屬</th>
+                  <tr ref={apTheadRowRef}>
+                    <th className="sticky-name sticky-name-head" style={{ minWidth:70, width:70, padding:"8px 10px" }}>姓名</th>
+                    <th className="sticky-attr-head" style={{ left: apColWidths[0] || 70 }}>班屬</th>
                     {allDays.map(d => {
                       const isRef = refDays.includes(d);
                       const dow = dayjs(d).day();
@@ -1566,10 +1860,9 @@ export default function AdminPage() {
                         <th key={d} className={`ap-th-day${isWe?" we":""}`}
                           style={{ background: isRef ? "#f8fafc" : undefined,
                                    color: isRef ? "#c4c4c4" : (isWe ? "#dc2626" : undefined) }}>
-                          <div style={{ fontSize:10, color: isRef?"#d1d5db":undefined }}>
-                            {dayjs(d).format("M/D")}
-                          </div>
-                          <div style={{ fontSize:9, opacity:.7 }}>{DOW_ZH[dow]}</div>
+                          <div style={{ fontSize:9, opacity:.6, color: isRef?"#d1d5db":undefined }}>{String(dayjs(d).month()+1).padStart(2,"0")}</div>
+                          <div style={{ color: isRef?"#d1d5db":undefined }}>{dayjs(d).date()}</div>
+                          <div style={{ fontSize:9, opacity:.7 }}>{DOW_ZH[dow].replace("週","")}</div>
                         </th>
                       );
                     })}
@@ -1578,15 +1871,17 @@ export default function AdminPage() {
                 <tbody>
                   {nurseUsers.map(u => (
                     <tr key={u.uid}>
-                      <td className="sticky-name" style={{ padding:"6px 10px", fontSize:13, fontWeight:600 }}>
+                      <td className="sticky-name" style={{ padding:"7px 10px", fontSize:15, fontWeight:700 }}>
                         {u.name}
                         {u.halftime && <span style={{ fontSize:9, color:"#16a34a", fontWeight:700, marginLeft:3 }}>半</span>}
+                        {u.admin_staff && <span style={{ fontSize:9, color:"#7c3aed", fontWeight:700, marginLeft:3 }}>行政</span>}
                       </td>
-                      <td className="sticky-attr">
+                      <td className="sticky-attr" style={{ left: apColWidths[0] || 70 }}>
                         {attrShort(u.attr) || "—"}
                       </td>
                       {allDays.map(d => {
                         const isRef = refDays.includes(d);
+                        const isWe  = [0, 6].includes(dayjs(d).day());
                         const row = schedule.find(r => r.nurse_uid===u.uid && r.date===d);
                         const key = `${u.uid}_${d}`;
                         const isCtrlSel   = ctrlSelected.has(key);
@@ -1594,7 +1889,8 @@ export default function AdminPage() {
                         const isDragFill  = dragFill?.nurseUid === u.uid && dragFill.dates.has(d);
                         const isSwipeSel  = swipeDates.has(d) && (swipeRef.current?.nurseUid === u.uid || swipePopup?.nurseUid === u.uid);
                         const isAnchor    = shiftAnchor?.nurseUid === u.uid && shiftAnchor.date === d && !shiftRange.size && !ctrlSelected.size;
-                        const { cls: baseCls, style } = cellStyle(row?.shift, row?.confirmed, saving.has(key), u.uid, row?.updated_by);
+                        const conflict = !!(row?.shift) && isAttrConflict(row.shift, u.attr);
+                        const { cls: baseCls, style } = cellStyle(row?.shift, row?.confirmed, saving.has(key), u.uid, row?.updated_by, conflict);
                         const cls = baseCls
                           + (isCtrlSel   ? " is-ctrl-sel"   : "")
                           + (isShiftSel  ? " is-shift-sel"  : "")
@@ -1646,8 +1942,8 @@ export default function AdminPage() {
                           setCtrlSelected(new Set());
                           setShiftRange(new Set());
                           setShiftAnchor({ nurseUid: u.uid, date: d, shift: row?.shift ?? "" });
-                          // 已確認格子先跳警告
-                          if (row?.confirmed) {
+                          // 已確認格子先跳警告（須同時有班別，避免殘留空值誤判）
+                          if (row?.confirmed && row?.shift) {
                             setConfirmEdit({ nurseUid: u.uid, date: d, nurseName: u.name });
                           } else {
                             setPopup({ date: d, nurseUid: u.uid, nurseName: u.name });
@@ -1655,7 +1951,7 @@ export default function AdminPage() {
                         }
 
                         return (
-                          <td key={d} className="ap-td-shift" style={{ background: isRef ? "#fafafa" : undefined }}>
+                          <td key={d} className={`ap-td-shift${isWe && !isRef ? " we" : ""}`} style={{ background: isRef ? "#fafafa" : undefined }}>
                             <span
                               className={cls}
                               style={cellFinalStyle}
@@ -1677,6 +1973,7 @@ export default function AdminPage() {
                   {/* 每日休假統計 */}
                   <tr>
                     <td className="sticky-name" style={{ padding:"5px 10px", fontSize:11, color:"#9ca3af", fontWeight:600, background:"#f8fafc" }}>休假人數</td>
+                    <td className="sticky-attr" style={{ background:"#f8fafc", left: apColWidths[0] || 70 }} />
                     {allDays.map(d => {
                       const isRef = refDays.includes(d);
                       return (
@@ -1727,7 +2024,12 @@ export default function AdminPage() {
                   const curLevel    = getUserVal(u, "level");
                   const curRole     = getUserVal(u, "role");
                   const curHalftime = getUserVal(u, "halftime");
+                  const curAdminStaff = getUserVal(u, "admin_staff");
+                  const curTrainee  = getUserVal(u, "is_trainee");
+                  const curMentor   = getUserVal(u, "mentor_uid") || "";
                   const curNote     = getUserVal(u, "note");
+                  // 導師候選：僅 leader 職位、正式排班護理師（排除行政、其他新人、半職、本人）
+                  const mentorOptions = nurseUsers.filter(x => x.level === "leader" && !x.admin_staff && !x.is_trainee && !x.halftime && x.uid !== u.uid);
 
                   const sel: React.CSSProperties = {
                     fontSize: 13, border: "1px solid #d1d5db", borderRadius: 6,
@@ -1795,8 +2097,9 @@ export default function AdminPage() {
                         <span style={{ fontWeight:600, fontSize:14, flexShrink:0 }}>{u.name}</span>
                         <code style={{ fontSize:11, background:"#f3f4f6", padding:"1px 5px", borderRadius:4, color:"#9ca3af", flexShrink:0 }}>{u.uid}</code>
                         {canEditRole ? (
-                          <select value={curRole} onChange={e => setUserEdit(u.uid, { role: e.target.value })}
-                            style={{ ...sel, width: 120 }}>
+                          <select value={curRole} disabled={curAdminStaff}
+                            onChange={e => setUserEdit(u.uid, { role: e.target.value })}
+                            style={{ ...sel, width: 120, ...(curAdminStaff ? disabledSelStyle : {}) }}>
                             <option value="nurse">護理師</option>
                             <option value="dual">管理員兼護理師</option>
                             <option value="admin">管理員</option>
@@ -1813,14 +2116,16 @@ export default function AdminPage() {
 
                       {/* ── 行 2：層級 ｜ 輪班 ｜ 比例 */}
                       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-                        <select value={curLevel} onChange={e => setUserEdit(u.uid, { level: e.target.value })}
-                          style={{ ...sel, width: 80 }}>
+                        <select value={curLevel} disabled={curAdminStaff}
+                          onChange={e => setUserEdit(u.uid, { level: e.target.value })}
+                          style={{ ...sel, width: 80, ...(curAdminStaff ? disabledSelStyle : {}) }}>
                           <option value="leader">leader</option>
                           <option value="second">second</option>
                           <option value="member">member</option>
                         </select>
-                        <select value={curAttr} onChange={e => setUserEdit(u.uid, { attr: e.target.value })}
-                          style={{ ...sel, width: 80 }}>
+                        <select value={curAttr} disabled={curAdminStaff}
+                          onChange={e => setUserEdit(u.uid, { attr: e.target.value })}
+                          style={{ ...sel, width: 80, ...(curAdminStaff ? disabledSelStyle : {}) }}>
                           <option value="固定D">固定D</option>
                           <option value="固定E">固定E</option>
                           <option value="固定N">固定N</option>
@@ -1829,30 +2134,57 @@ export default function AdminPage() {
                           <option value="輪班DN">輪班DN</option>
                           <option value="輪班DEN">輪班DEN</option>
                         </select>
-                        {attrRatioBadge}
+                        {!curAdminStaff && attrRatioBadge}
                       </div>
 
-                      {/* ── 行 3：☐ 半職 ｜ 備註（flex-grow） */}
-                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
-                        <label style={{ display:"flex", alignItems:"center", gap:4, fontSize:13, color:"#374151", cursor:"pointer", flexShrink:0 }}>
-                          <input type="checkbox" checked={curHalftime}
+                      {/* ── 行 3：☐ 半職 ｜ ☐ 行政（新人待實作後併入此行） */}
+                      <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:6 }}>
+                        <label style={{ display:"flex", alignItems:"center", gap:4, fontSize:13, color: curAdminStaff ? "#9ca3af" : "#374151", cursor: curAdminStaff ? "not-allowed" : "pointer", flexShrink:0 }}>
+                          <input type="checkbox" checked={curHalftime} disabled={curAdminStaff}
                             onChange={e => setUserEdit(u.uid, { halftime: e.target.checked })}
-                            style={{ width:15, height:15, cursor:"pointer" }} />
+                            style={{ width:15, height:15, cursor: curAdminStaff ? "not-allowed" : "pointer" }} />
                           半職
                         </label>
+                        <label style={{ display:"flex", alignItems:"center", gap:4, fontSize:13, color:"#374151", cursor:"pointer", flexShrink:0 }}>
+                          <input type="checkbox" checked={curAdminStaff}
+                            onChange={e => setUserEdit(u.uid, e.target.checked
+                              ? { admin_staff: true, role: "nurse", level: "member", halftime: false, is_trainee: false, mentor_uid: "" }
+                              : { admin_staff: false })}
+                            style={{ width:15, height:15, cursor:"pointer" }} />
+                          行政
+                        </label>
+                        <label style={{ display:"flex", alignItems:"center", gap:4, fontSize:13, color: curAdminStaff ? "#9ca3af" : "#374151", cursor: curAdminStaff ? "not-allowed" : "pointer", flexShrink:0 }}>
+                          <input type="checkbox" checked={curTrainee} disabled={curAdminStaff}
+                            onChange={e => setUserEdit(u.uid, e.target.checked
+                              ? { is_trainee: true, role: "nurse" }
+                              : { is_trainee: false, mentor_uid: "" })}
+                            style={{ width:15, height:15, cursor: curAdminStaff ? "not-allowed" : "pointer" }} />
+                          新人
+                        </label>
+                        {curTrainee && (
+                          <select value={curMentor} onChange={e => setUserEdit(u.uid, { mentor_uid: e.target.value })}
+                            style={{ ...sel, maxWidth: 150 }} title="導師（新人跟隨此人排班）">
+                            <option value="">— 選導師 —</option>
+                            {mentorOptions.map(mo => <option key={mo.uid} value={mo.uid}>{mo.name}</option>)}
+                          </select>
+                        )}
+                      </div>
+
+                      {/* ── 行 4：備註 */}
+                      <div style={{ marginBottom:6 }}>
                         <input
                           value={curNote}
                           placeholder="備註"
                           onChange={e => setUserEdit(u.uid, { note: e.target.value })}
                           style={{
-                            flex: 1, minWidth: 0,
+                            width: "100%", minWidth: 0,
                             fontSize:13, border:"1px solid #d1d5db", borderRadius:6,
                             padding:"5px 10px", background:"#f9fafb", fontFamily:"inherit",
                           }}
                         />
                       </div>
 
-                      {/* ── 行 4：儲存（靠左）｜ 🔑 ｜ 🗑（靠右） */}
+                      {/* ── 行 5：儲存（靠左）｜ 🔑 ｜ 🗑（靠右） */}
                       <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                         <button
                           disabled={!isDirty || isSavingThis}
@@ -1866,7 +2198,7 @@ export default function AdminPage() {
                         >{isSavingThis ? "儲存中…" : "儲存"}</button>
                         <div style={{ marginLeft:"auto", display:"flex", gap:6 }}>
                           <button style={btnSm} title="重設密碼"
-                            onClick={() => { setEditUser(u); setEditForm({ name:u.name, role:u.role, level:u.level, attr:u.attr, halftime:u.halftime, note:u.note, showEditPwd:true }); }}>🔑</button>
+                            onClick={() => { setEditUser(u); setEditForm({ name:u.name, role:u.role, level:u.level, attr:u.attr, halftime:u.halftime, admin_staff:u.admin_staff, note:u.note, showEditPwd:true }); }}>🔑</button>
                           {u.uid !== user.uid && (
                             <button style={{ ...btnSm, background:"#fef2f2", border:"1px solid #fecaca", color:"#dc2626" }}
                               onClick={() => setDeleteTarget(u)}>🗑</button>
@@ -1915,7 +2247,9 @@ export default function AdminPage() {
                     </div>
                     <div>
                       <label className="flabel">輪班屬性</label>
-                      <select className="finput" value={newUser.attr} onChange={e => setNewUser(p=>({...p,attr:e.target.value}))}>
+                      <select className="finput" value={newUser.attr} disabled={newUser.admin_staff}
+                        style={newUser.admin_staff ? disabledSelStyle : undefined}
+                        onChange={e => setNewUser(p=>({...p,attr:e.target.value}))}>
                         <option value="固定D">固定D（幾乎只排白班）</option>
                         <option value="固定E">固定E（幾乎只排小夜）</option>
                         <option value="固定N">固定N（幾乎只排大夜）</option>
@@ -1929,7 +2263,9 @@ export default function AdminPage() {
                   <div className="frow3">
                     <div>
                       <label className="flabel">角色</label>
-                      <select className="finput" value={newUser.role} onChange={e => setNewUser(p=>({...p,role:e.target.value}))}>
+                      <select className="finput" value={newUser.role} disabled={newUser.admin_staff}
+                        style={newUser.admin_staff ? disabledSelStyle : undefined}
+                        onChange={e => setNewUser(p=>({...p,role:e.target.value}))}>
                         <option value="nurse">護理師</option>
                         <option value="dual">管理員兼護理師</option>
                         <option value="admin">管理員</option>
@@ -1938,18 +2274,43 @@ export default function AdminPage() {
                     </div>
                     <div>
                       <label className="flabel">層級</label>
-                      <select className="finput" value={newUser.level} onChange={e => setNewUser(p=>({...p,level:e.target.value}))}>
+                      <select className="finput" value={newUser.level} disabled={newUser.admin_staff}
+                        style={newUser.admin_staff ? disabledSelStyle : undefined}
+                        onChange={e => setNewUser(p=>({...p,level:e.target.value}))}>
                         <option value="leader">leader</option>
                         <option value="second">second</option>
                         <option value="member">member</option>
                       </select>
                     </div>
-                    <div style={{ display:"flex", alignItems:"flex-end", paddingBottom:2 }}>
+                    <div style={{ display:"flex", alignItems:"flex-end", paddingBottom:2, gap:12 }}>
                       <label className="fcheck">
-                        <input type="checkbox" checked={newUser.halftime} onChange={e => setNewUser(p=>({...p,halftime:e.target.checked}))} />
+                        <input type="checkbox" checked={newUser.halftime} disabled={newUser.admin_staff}
+                          onChange={e => setNewUser(p=>({...p,halftime:e.target.checked}))} />
                         <span style={{ fontSize:13 }}>半職人員</span>
                       </label>
+                      <label className="fcheck">
+                        <input type="checkbox" checked={newUser.admin_staff}
+                          onChange={e => setNewUser(p=>({...p, admin_staff:e.target.checked,
+                            ...(e.target.checked ? { role:"nurse", level:"member", halftime:false, is_trainee:false, mentor_uid:"" } : {}) }))} />
+                        <span style={{ fontSize:13 }}>行政人員</span>
+                      </label>
+                      <label className="fcheck">
+                        <input type="checkbox" checked={newUser.is_trainee} disabled={newUser.admin_staff}
+                          onChange={e => setNewUser(p=>({...p, is_trainee:e.target.checked,
+                            ...(e.target.checked ? { role:"nurse" } : { mentor_uid:"" }) }))} />
+                        <span style={{ fontSize:13 }}>新人</span>
+                      </label>
                     </div>
+                    {newUser.is_trainee && (
+                      <div>
+                        <label className="flabel">導師（新人跟隨此人排班，可留空）</label>
+                        <select className="finput" style={{ maxWidth:240 }} value={newUser.mentor_uid}
+                          onChange={e => setNewUser(p=>({...p, mentor_uid:e.target.value}))}>
+                          <option value="">— 選導師 —</option>
+                          {nurseUsers.filter(x => x.level === "leader" && !x.admin_staff && !x.is_trainee && !x.halftime).map(mo => <option key={mo.uid} value={mo.uid}>{mo.name}</option>)}
+                        </select>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="flabel">備註（選填）</label>
@@ -2043,8 +2404,9 @@ export default function AdminPage() {
                       <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                         <input className="finput" type="date" value={cycle.deadline_date}
                           onChange={e => setCycle(p=>({...p,deadline_date:e.target.value}))} style={{ flex:1 }} />
-                        <input className="finput" type="time" value={cycle.deadline_time}
-                          onChange={e => setCycle(p=>({...p,deadline_time:e.target.value}))} style={{ width:110 }} />
+                        <input className="finput" type="time" step={60} value={cycle.deadline_time}
+                          onChange={e => setCycle(p=>({...p,deadline_time:e.target.value}))}
+                          style={{ width:100, flex:"0 0 100px" }} />
                       </div>
                       {cycle.deadline_date && (
                         <div style={{ fontSize:12, color:"#1d4ed8", marginTop:5, fontWeight:500 }}>
@@ -2057,32 +2419,6 @@ export default function AdminPage() {
                         護理師需在 <b style={{ color:"#dc2626" }}>{fmtDateDay(cycle.deadline_date)} {cycle.deadline_time}</b> 前完成填寫並確認送出
                       </div>
                     )}
-                  </div>
-
-                  {/* ── 國定假日天數 */}
-                  <div className="setting-section">
-                    <div className="setting-title">🗓 國定假日天數</div>
-                    <div style={{ maxWidth:280 }}>
-                      <label className="flabel">本週期國定假日天數（0 ～ 5 天）</label>
-                      <NumInput className="finput" min={0} max={5} value={cycle.holiday_days}
-                        onChange={n => setCycle(p=>({...p,holiday_days:n}))} />
-                    </div>
-                    <div style={{ marginTop:12, display:"flex", gap:14, flexWrap:"wrap" }}>
-                      <div style={{ padding:"12px 16px", background:"#dcfce7", borderRadius:10, border:"1px solid #bbf7d0", minWidth:175 }}>
-                        <div style={{ fontSize:12, color:"#15803d", fontWeight:600, marginBottom:4 }}>全職應休天數</div>
-                        <div style={{ fontSize:28, fontWeight:800, color:"#15803d" }}>{fullTimeOff} 天</div>
-                        <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>= 8 + {cycle.holiday_days} 國定假日</div>
-                      </div>
-                      <div style={{ padding:"12px 16px", background:"#fef3c7", borderRadius:10, border:"1px solid #fde68a", minWidth:175 }}>
-                        <div style={{ fontSize:12, color:"#92400e", fontWeight:600, marginBottom:4 }}>半職應休天數</div>
-                        <div style={{ fontSize:28, fontWeight:800, color:"#92400e" }}>{partTimeOff} 天</div>
-                        <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>= 16 + {cycle.holiday_days} 國定假日（獨立計算）</div>
-                      </div>
-                    </div>
-                    <div style={{ marginTop:10, fontSize:12, color:"#9ca3af", lineHeight:1.7 }}>
-                      • 全職：基底 8 天，加國定假日，最多 13 天<br />
-                      • 半職：基底 16 天，加國定假日，最多 21 天，不依全職公式連動
-                    </div>
                   </div>
 
                   <div style={{ display:"flex", alignItems:"center", gap:14 }}>
@@ -2109,6 +2445,41 @@ export default function AdminPage() {
         {tab === "rules" && (
           <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth:740 }}>
 
+            {/* 週期內應休天數 */}
+            <div className="card">
+              <div className="card-body">
+                <div className="setting-section" style={{ marginBottom:0 }}>
+                  <div className="setting-title">🗓 週期內應休天數</div>
+                  <div style={{ maxWidth:280 }}>
+                    <label className="flabel">本週期國定假日天數（0 ～ 5 天）</label>
+                    <NumInput className="finput" min={0} max={5} value={cycle.holiday_days}
+                      onChange={n => setCycle(p=>({...p,holiday_days:n}))} />
+                  </div>
+                  <div style={{ marginTop:12, display:"flex", gap:14, flexWrap:"wrap" }}>
+                    <div style={{ padding:"12px 16px", background:"#dcfce7", borderRadius:10, border:"1px solid #bbf7d0", minWidth:175 }}>
+                      <div style={{ fontSize:12, color:"#15803d", fontWeight:600, marginBottom:4 }}>全職應休天數</div>
+                      <div style={{ fontSize:28, fontWeight:800, color:"#15803d" }}>{fullTimeOff} 天</div>
+                      <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>= 8 + {cycle.holiday_days} 國定假日</div>
+                    </div>
+                    <div style={{ padding:"12px 16px", background:"#fef3c7", borderRadius:10, border:"1px solid #fde68a", minWidth:175 }}>
+                      <div style={{ fontSize:12, color:"#92400e", fontWeight:600, marginBottom:4 }}>半職應休天數</div>
+                      <div style={{ fontSize:28, fontWeight:800, color:"#92400e" }}>{partTimeOffExact} 天</div>
+                      <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>= 28 − (160 − {cycle.holiday_days}×8)÷2÷8</div>
+                    </div>
+                    <div style={{ padding:"12px 16px", background:"#eff6ff", borderRadius:10, border:"1px solid #bfdbfe", minWidth:175 }}>
+                      <div style={{ fontSize:12, color:"#1d4ed8", fontWeight:600, marginBottom:4 }}>半職可上天數（試算用）</div>
+                      <div style={{ fontSize:28, fontWeight:800, color:"#1d4ed8" }}>{partTimeWork} 天</div>
+                      <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>小數點無條件捨去</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:14 }}>
+                    <button className="btn btn-primary" onClick={saveCycle}>儲存</button>
+                    <span style={{ fontSize:12, color:"#9ca3af" }}>修改國定假日天數後請按儲存</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* 休假與人數 */}
             <div className="card">
               <div className="card-head"><div style={{ fontSize:16, fontWeight:700 }}>排班規則設定</div></div>
@@ -2116,11 +2487,14 @@ export default function AdminPage() {
                 <div className="fl">
 
                   <div className="setting-section">
-                    <div className="setting-title">🌴 休假天數上限</div>
+                    <div className="setting-title">🌴 預班上限（天）</div>
                     <div style={{ maxWidth:280 }}>
-                      <label className="flabel">每人可申請休假天數上限（天）</label>
+                      <label className="flabel">全職護理師可預填的白班/小夜/大夜/OFF 總天數上限</label>
                       <NumInput className="finput" min={0} max={31} value={rulesForm.max_off_days}
                         onChange={n => setRulesForm(p=>({...p,max_off_days:n}))} />
+                    </div>
+                    <div style={{ fontSize:12, color:"#9ca3af", marginTop:6, lineHeight:1.6 }}>
+                      超過此上限時，護理師預班會被硬擋、無法再填。半、特休V 等放假調整類不計入；半職不受限；設為 0 代表不限制。
                     </div>
                   </div>
 
@@ -2172,11 +2546,15 @@ export default function AdminPage() {
                         onChange={n => setRulesForm(p=>({...p,max_consecutive_work:n}))} />
                     </div>
                     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                      <label className="fcheck">
-                        <input type="checkbox" checked={rulesForm.weekly_max_two_shifts}
-                          onChange={e => setRulesForm(p=>({...p,weekly_max_two_shifts:e.target.checked}))} />
-                        <span style={{ fontSize:13 }}>每週 D/E/N 至多兩種班別（避免同週混排三種班型）</span>
-                      </label>
+                      <div style={{ fontSize:13, display:"flex", alignItems:"flex-start", gap:6 }}>
+                        <span style={{ color:"#16a34a", fontWeight:700 }}>✓</span>
+                        <div>
+                          每週 D/E/N 至多兩種班別（<b>固定啟用，不可關閉</b>）<br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>
+                            若預填出現班屬外班別（如輪班DE填入N），該週自動改為「例外班種＋一種原班別」，其餘週仍維持原班屬
+                          </span>
+                        </div>
+                      </div>
                       <label className="fcheck">
                         <input type="checkbox" checked={rulesForm.lock_first_day}
                           onChange={e => setRulesForm(p=>({...p,lock_first_day:e.target.checked}))} />
@@ -2189,13 +2567,10 @@ export default function AdminPage() {
                     <div className="setting-title">⚖ 班型規則說明</div>
                     <div style={{ fontSize:13, lineHeight:2, color:"#374151" }}>
                       <div style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
-                        <label className="fcheck" style={{ marginTop:2 }}>
-                          <input type="checkbox" checked={rulesForm.no_reverse_shift}
-                            onChange={e => setRulesForm(p=>({...p,no_reverse_shift:e.target.checked}))} />
-                        </label>
+                        <span style={{ marginTop:1, color:"#16a34a", fontWeight:800, flexShrink:0 }}>✓</span>
                         <div>
-                          <b>反向班禁止（硬規則）</b><br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>禁止 N→D、N→E、E→D 反向排列。大夜後不能排白班或小夜，小夜後不能排白班。</span>
+                          <b>反向班禁止（硬規則 · 固定啟用）</b><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>禁止 N→D、N→E、E→D 反向排列。大夜後不能排白班或小夜，小夜後不能排白班。此為一定達成的硬規則，不可關閉。</span>
                         </div>
                       </div>
                     </div>
@@ -2210,8 +2585,8 @@ export default function AdminPage() {
                         <input type="checkbox" checked={rulesForm.restrict_first_weekend}
                           onChange={e => setRulesForm(p=>({...p,restrict_first_weekend:e.target.checked}))} />
                         <div>
-                          <span style={{ fontSize:13 }}>限制週期首個週末連休</span><br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>排班週期第一個週六和週日不可同時為休假</span>
+                          <span style={{ fontSize:13 }}>限制首個週末連休（護理師預班）</span><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>全職護理師預班時，不可將週期第一個週六、週日同時預成 OFF（只算 OFF、半職不受限）。自動排班不受此限。</span>
                         </div>
                       </label>
 
@@ -2221,7 +2596,17 @@ export default function AdminPage() {
                           onChange={e => setRulesForm(p=>({...p,one_in_seven:e.target.checked}))} />
                         <div>
                           <span style={{ fontSize:13 }}>一例一休（每週至少 2 天休假）</span><br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>每週一到週日至少安排 2 天休假</span>
+                          <span style={{ fontSize:12, color:"#6b7280" }}>硬規則：每週至少安排 2 天休假。人力或預班湊不出時，一鍵生成會失敗（非扣分），可取消勾選改為不強制</span>
+                        </div>
+                      </label>
+
+                      {/* 固定班偏離 */}
+                      <label className="fcheck">
+                        <input type="checkbox" checked={rulesForm.allow_fixed_deviation}
+                          onChange={e => setRulesForm(p=>({...p,allow_fixed_deviation:e.target.checked}))} />
+                        <div>
+                          <span style={{ fontSize:13 }}>允許固定班偏離（最多 2 格）</span><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>勾選：固定班（固定D/E/N）在人力缺口時最多可偏離 2 格到其他班別。取消勾選：固定班完全不可偏離、只排該班（湊不出時會生成失敗）。註：公平優先版一律不可偏離。</span>
                         </div>
                       </label>
 
@@ -2241,13 +2626,13 @@ export default function AdminPage() {
                           <label className="flabel">自動休連續上限（天）</label>
                           <NumInput className="finput" min={1} max={7} value={rulesForm.weekly_max_off_auto}
                             onChange={n => setRulesForm(p=>({...p,weekly_max_off_auto:n}))} />
-                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>自動休最多連續 N 天，超過視為違規</div>
+                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>自動休最多連續 N 天，超過視為違規（半職護理師不受此限）</div>
                         </div>
                         <div>
                           <label className="flabel">連續 OFF 總上限（天）</label>
                           <NumInput className="finput" min={1} max={7} value={rulesForm.weekly_max_off_total}
                             onChange={n => setRulesForm(p=>({...p,weekly_max_off_total:n}))} />
-                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>指定休 + 自動休合計不可連續超過 N 天（特休等放假/調整類自動中斷計算）</div>
+                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>指定休 + 自動休合計不可連續超過 N 天（特休等放假/調整類自動中斷計算）（半職護理師不受此限）</div>
                         </div>
                       </div>
                     </div>
@@ -2417,26 +2802,34 @@ export default function AdminPage() {
               <div className="card-body">
                 <div style={{ display:"flex", flexDirection:"column", gap:6, fontSize:13, color:"#374151", lineHeight:1.8 }}>
                   <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginBottom:2 }}>── 硬規則（一定遵守）──</div>
-                  <div>• 每班每日剛好符合設定人數（D / E / N 各班不多不少）</div>
+                  <div>• 每班每日恰好符合設定人數（硬性）；若因預填/已確認資料湊不齊，會生成失敗並提示原因</div>
+                  <div>• 已填班別（含未確認）一律保留，不得覆蓋，只填寫空白格子</div>
                   <div>• 反向班禁止：E→D 需隔 1 天休；N→E 需隔 1 天休；N→D 需隔 2 天休</div>
-                  <div>• 每週至少 1 天休假（勾選一例一休改為至少 2 天）</div>
-                  <div>• 每週 D/E/N 至多兩種班別，避免同週混排三種班型</div>
+                  <div>• 每週 D/E/N 至多兩種班別（絕對硬性）。若預填出現班屬外班別（如輪班DE填N），該週自動改為「例外班種＋一種原班別」（如 N+D 或 N+E），其餘週維持原班屬</div>
+                  <div>• 每週至少 1 天休假（硬性）</div>
+                  <div>• 一例一休（每週至少 2 天休）：硬性（勾選時）；若人力或預班湊不出，會生成失敗並提示原因。不勾則完全不強制</div>
+                  <div>• 每班每日至少 1 位 leader（硬性）</div>
+                  <div>• 每班每日至少 2 位 leader/second（硬性，受當班需求人數上限）</div>
                   <div>• 連續上班天數不超過設定值，跨週累計</div>
-                  <div>• 每班需有至少 1 位 leader，且至少 2 位 leader / second 層級</div>
-                  <div>• 全職應休 8 + 國定假日 天；半職應休 16 + 國定假日 天</div>
+                  <div>• 輪班屬性限制（輪班DE只排D/E等）；固定班偏離由「允許固定班偏離」規則控制（勾＝最多偏離 2 格、未勾＝完全不可偏離）。<b>公平優先版：固定班 0 偏離、絕對只排該班</b></div>
                   <div>• 放假 / 調整類（特休 V、員旅、喪假、延休、補休、調移）：最高優先鎖定，不佔應休名額</div>
                   <div>• 半職（半）視同應休，計入應休天數</div>
+                  <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginTop:6, marginBottom:2 }}>── 應休天數 ──</div>
+                  <div>• 全職應休 = 8 + 國定假日（最多 13 天）；半職應休 = 28 − (160 − 國定假日×8)÷2÷8（可上天數小數點無條件捨去）</div>
+                  <div>• 應休下限為軟約束：人力不足時最多縮減 2 天；超休每天懲罰 500</div>
                   <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginTop:6, marginBottom:2 }}>── 休假規則 ──</div>
                   <div>• 指定休不可覆蓋：管理員標記的 OFF 不被生成取代</div>
                   <div>• 第一天鎖定：週期第一天已有記錄時鎖定，不被生成覆蓋</div>
-                  <div>• 首個週末：週期第一個週六、週日不可同時休假</div>
-                  <div>• 自動休連續上限 N 天：系統排的休假不超過 N 天連休（指定休可中斷計算）</div>
-                  <div>• 連續 OFF 總上限：指定休 + 自動休合計連休不得超過設定值（特休等放假/調整類自動中斷計算）</div>
+                  <div>• 首個週末（護理師預班限制）：全職護理師預班時不可將週期第一個週六、週日同時填 OFF（只算 OFF、半職不受限）；自動排班不受此限</div>
+                  <div>• 自動休連續上限 N 天：系統排的休假不超過 N 天連休（指定休可中斷計算）（半職不受此限）</div>
+                  <div>• 連續 OFF 總上限：指定休 + 自動休合計連休不得超過設定值（放假/調整類自動中斷；預填已超過時自動讓路）（半職不受此限）</div>
                   <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginTop:6, marginBottom:2 }}>── 軟規則（人力允許時盡量遵守）──</div>
-                  <div>• 固定班（固定 D / E / N）：整週期以同一班種為主，人力缺口才少數換班</div>
-                  <div>• 盡量順班 + 切換前盡量安排休息（固定啟用）</div>
-                  <div style={{ paddingLeft:12, color:"#6b7280", fontSize:12 }}>不休息直接切換班別 懲罰 +3；隔至少一天 OFF 再切換 懲罰 +2；不切換（同班種） 懲罰 0</div>
-                  <div>• 各護理師班次數接近設定比例（允許 ±2 天偏差）</div>
+                  <div>• 順班：只罰「多餘換班」＋「沒休就換」（輪班本來就必須換的「必要換班」不罰）</div>
+                  <div style={{ paddingLeft:12, color:"#6b7280", fontSize:12 }}>必要換班數＝班種數−1（固定班0、2種班1、DEN2）。多餘換班每次 +1500；沒休直接換每次另加 +500。→ 必要+有休=0；必要+沒休=500；多餘+有休=1500；多餘+沒休=2000</div>
+                  <div>• 避免孤立上班日：OFF-上班-OFF（只出來上一天班）懲罰 +750</div>
+                  <div>• 固定班（固定 D / E / N）：偏離固定班種每格懲罰 +500，且硬性最多 2 格偏離</div>
+                  <div>• 各護理師班次數接近設定比例（±1 天彈性，超出每單位懲罰 +900）</div>
+                  <div>• 應休天數縮減公平性：各護理師縮減幅度差距（懲罰 400）</div>
                 </div>
               </div>
             </div>
@@ -2578,62 +2971,103 @@ export default function AdminPage() {
         ══════════════════════════════════ */}
         {tab === "generate" && (() => {
 
-          const unconfirmedCount = schedule.filter(r => cycleDays.includes(r.date) && !r.confirmed && r.shift).length;
-          const confirmedCount   = schedule.filter(r => cycleDays.includes(r.date) && r.confirmed).length;
-          const filledCount      = schedule.filter(r => cycleDays.includes(r.date) && r.shift).length;
+          // 一鍵生成頁籤只反映「已儲存至資料庫」的設定（generate 讀 DB），避免誤以為已儲存
+          const dCycle = savedCycle ?? cycle;
+          const dRules = savedRules ?? rulesForm;
+          const dHd = dCycle.holiday_days;
+          const dFullOff = Math.min(8 + dHd, 13);
+          const dPartWork = Math.floor((160 - dHd * 8) / 2 / 8);
+          const dPartOff = 28 - dPartWork;
+          const dCycleIsSet = !!(dCycle.start_date && dCycle.end_date);
+          const dPeriod = (dCycle.start_date && dCycle.end_date)
+            ? dayjs(dCycle.end_date).diff(dayjs(dCycle.start_date), "day") + 1
+            : dCycle.period_days;
+          const dCycleDays = dCycleIsSet
+            ? Array.from({ length: dPeriod }, (_, i) => dayjs(dCycle.start_date).add(i, "day").format("YYYY-MM-DD"))
+            : [];
+
+          const unconfirmedCount = schedule.filter(r => dCycleDays.includes(r.date) && !r.confirmed && r.shift).length;
+          const confirmedCount   = schedule.filter(r => dCycleDays.includes(r.date) && r.confirmed && r.shift).length;
+          const filledCount      = schedule.filter(r => dCycleDays.includes(r.date) && r.shift).length;
 
           async function runGenerate() {
             setGenerating(true);
-            setGenResult(""); setGenWarnings([]); setGenAnomalies([]);
-            setConfirmGenerate(false); setPendingSchedule(null); setCommitResult("");
-            try {
-              const { data } = await api.post(
-                `/schedule/generate?overwrite_confirmed=${overwriteConfirmed}`
-              );
-              setGenResult(data.message ?? "完成");
-              setGenWarnings(data.warnings ?? []);
-              setGenAnomalies(data.anomalies ?? []);
-              setPendingSchedule({
-                schedules: data.schedules,
-                cycle_dates: data.cycle_dates,
-                overwrite_confirmed: overwriteConfirmed,
-              });
-            } catch (err: any) {
-              setGenResult("✗ " + (err.response?.data?.detail ?? err.message ?? "生成失敗"));
-            } finally { setGenerating(false); }
+            setGenResult(""); setCommitResult("");
+            setGenVersions({}); setSelectedProfile(null);
+            setConfirmGenerate(false);
+            const results: Partial<Record<GenProfileKey, GenVersion>> = {};
+            for (const p of GEN_PROFILES) {
+              try {
+                const { data } = await api.post(
+                  `/schedule/generate?overwrite_confirmed=false&profile=${p.key}`
+                );
+                results[p.key] = {
+                  schedules: data.schedules,
+                  cycle_dates: data.cycle_dates,
+                  message: data.message ?? "完成",
+                  warnings: data.warnings ?? [],
+                  anomalies: data.anomalies ?? [],
+                  prefill_warnings: data.prefill_warnings ?? [],
+                  metrics: data.metrics ?? null,
+                };
+                setGenDemand(data.demand_config ?? null);
+              } catch (err: any) {
+                results[p.key] = {
+                  schedules: {}, cycle_dates: [], message: "", warnings: [], anomalies: [],
+                  prefill_warnings: [], metrics: null,
+                  error: err.response?.data?.detail ?? err.message ?? "生成失敗",
+                };
+              }
+              setGenVersions({ ...results });
+            }
+            setGenerating(false);
+            const okCount = Object.values(results).filter(v => v && !v.error).length;
+            setGenResult(okCount === 0 ? "✗ 三個版本皆生成失敗" : `✓ 已生成 ${okCount}／3 個版本，請比較後選擇一版匯入`);
           }
 
           async function runCommit() {
-            if (!pendingSchedule) return;
+            if (!selectedProfile) return;
+            const v = genVersions[selectedProfile];
+            if (!v) return;
             setCommitting(true); setCommitResult("");
             try {
-              const { data } = await api.post("/schedule/commit", pendingSchedule);
+              const { data } = await api.post("/schedule/commit", {
+                schedules: v.schedules, cycle_dates: v.cycle_dates, overwrite_confirmed: false,
+              });
               setCommitResult(data.message ?? "匯入完成");
               setHasGenerated(true);
-              // 儲存本次生成的格子 key，供「回復到預假狀態」使用
-              const generatedKeys = pendingSchedule.cycle_dates.flatMap(d =>
-                Object.entries(pendingSchedule!.schedules)
-                  .filter(([, shifts]) => shifts[d] && shifts[d] !== "OFF")
-                  .map(([uid]) => `${uid}_${d}`)
-              );
-              localStorage.setItem("cpsat_generated_keys", JSON.stringify(generatedKeys));
-              localStorage.setItem("cpsat_generated_cycle", JSON.stringify({
-                start: pendingSchedule.cycle_dates[0],
-                end: pendingSchedule.cycle_dates[pendingSchedule.cycle_dates.length - 1],
-              }));
-              setPendingSchedule(null);
+              setGenVersions({}); setSelectedProfile(null);
               fetchSchedule();
             } catch (err: any) {
               setCommitResult("✗ " + (err.response?.data?.detail ?? err.message ?? "匯入失敗"));
             } finally { setCommitting(false); }
           }
 
+          async function downloadVersionTemp(p: GenProfileKey) {
+            const v = genVersions[p];
+            if (!v) return;
+            try {
+              const { data } = await api.post("/export/temp", {
+                schedules: v.schedules, cycle_dates: v.cycle_dates,
+              }, { responseType: "blob" });
+              const blobUrl = URL.createObjectURL(data);
+              const link = document.createElement("a");
+              link.href = blobUrl;
+              const label = GEN_PROFILES.find(g => g.key === p)?.label ?? p;
+              link.download = `暫時班表_${label}_${dCycle.start_date}_${dCycle.end_date}.xlsx`;
+              link.click();
+              URL.revokeObjectURL(blobUrl);
+            } catch (err: any) {
+              alert("匯出失敗：" + (err.response?.data?.detail ?? err.message ?? "網路錯誤"));
+            }
+          }
+
           async function downloadExport(type: "preview" | "schedule") {
             const token = getAuth()?.token;
             const base = (api.defaults.baseURL ?? "").replace(/\/$/, "");
-            const url  = `${base}/export/${type}`;
+            const url  = `${base}/export/${type}?_=${Date.now()}`;
             try {
-              const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+              const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
               if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
                 alert("匯出失敗：" + (err.detail ?? res.statusText));
@@ -2644,8 +3078,8 @@ export default function AdminPage() {
               const link = document.createElement("a");
               link.href = blobUrl;
               link.download = type === "preview"
-                ? `預假狀態_${cycle.start_date}_${cycle.end_date}.xlsx`
-                : `完整班表_${cycle.start_date}_${cycle.end_date}.xlsx`;
+                ? `預假狀態_${dCycle.start_date}_${dCycle.end_date}.xlsx`
+                : `完整班表_${dCycle.start_date}_${dCycle.end_date}.xlsx`;
               link.click();
               URL.revokeObjectURL(blobUrl);
             } catch (e: any) {
@@ -2675,18 +3109,18 @@ export default function AdminPage() {
                     <div className="setting-title">生成前確認清單</div>
                     <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                       <CheckItem
-                        ok={cycleIsSet}
-                        label={cycleIsSet
-                          ? `排班週期：${cycle.start_date} ～ ${cycle.end_date}（${cycle.period_days} 天）`
+                        ok={dCycleIsSet}
+                        label={dCycleIsSet
+                          ? `排班週期：${dCycle.start_date} ～ ${dCycle.end_date}（${dCycle.period_days} 天）`
                           : "尚未設定排班週期，請先至「排班週期」tab 設定"}
                       />
                       <CheckItem
-                        ok={nurseUsers.length > 0}
-                        label={`護理師人數：${nurseUsers.length} 人`}
+                        ok={schedulableNurses.length > 0}
+                        label={`護理師人數：${schedulableNurses.length} 人（不含行政人員）`}
                       />
                       <CheckItem
                         ok={true}
-                        label={`全職應休 ${fullTimeOff} 天｜半職應休 ${partTimeOff} 天`}
+                        label={`全職應休 ${dFullOff} 天｜半職應休 ${dPartOff} 天`}
                       />
                       <CheckItem
                         ok={filledCount === 0}
@@ -2700,17 +3134,32 @@ export default function AdminPage() {
 
                   {/* ── 人力試算 */}
                   {(() => {
-                    const n = cycle.period_days;
-                    const fullNurses  = nurseUsers.filter(u => !u.halftime).length;
-                    const halfNurses  = nurseUsers.filter(u =>  u.halftime).length;
-                    // 每日上班人數合計（考慮特殊日期覆蓋比較複雜，這裡先用預設值）
-                    const dailyTotal  = rulesForm.daily_d + rulesForm.daily_e + rulesForm.daily_n;
-                    // 總需求人力 = 每日人數 × 天數
-                    const totalRequired = dailyTotal * n;
-                    // 各護理師可提供的上班天數 = 週期天數 - 應休天數
+                    const n = dCycle.period_days;
+                    const fullNurses  = schedulableNurses.filter(u => !u.halftime).length;
+                    const halfNurses  = schedulableNurses.filter(u =>  u.halftime).length;
+                    // 非臨床/請假類已填班別統計：D/E/N/OFF/半 以外全部計入（未來新增班別自動涵蓋）
+                    const _baseShifts = ["D", "E", "N", "OFF", "半"];
+                    const _schedulableUids = new Set(schedulableNurses.map(u => u.uid));
+                    const specialShiftCount = schedule.filter(r =>
+                      dCycleDays.includes(r.date) && r.shift &&
+                      !_baseShifts.includes(r.shift) && _schedulableUids.has(r.nurse_uid)
+                    ).length;
+                    const defaultDaily = dRules.daily_d + dRules.daily_e + dRules.daily_n;
+                    // 特殊日期 map
+                    const sdMap: Record<string, { d:number; e:number; n:number }> = {};
+                    for (const sd of dRules.special_dates) {
+                      if (sd.date) sdMap[sd.date] = sd;
+                    }
+                    // 逐日加總實際需求（正確公式）
+                    const totalRequired = dCycleDays.reduce((acc, d) => {
+                      const ov = sdMap[d];
+                      return acc + (ov ? ov.d + ov.e + ov.n : defaultDaily);
+                    }, 0);
+                    const specialCount  = dCycleDays.filter(d => !!sdMap[d]).length;
+                    // 各護理師可提供的上班天數
                     const totalAvailable =
-                      fullNurses * (n - fullTimeOff) +
-                      halfNurses * (n - partTimeOff);
+                      fullNurses * (n - dFullOff) +
+                      halfNurses * dPartWork;
                     // 多餘人力
                     const surplus = totalAvailable - totalRequired;
                     const color =
@@ -2724,12 +3173,29 @@ export default function AdminPage() {
                         </div>
                         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 20px", fontSize:12, color:"#374151", marginBottom:10 }}>
                           <div>週期天數：<b>{n} 天</b></div>
-                          <div>每日需求：<b>D{rulesForm.daily_d}＋E{rulesForm.daily_e}＋N{rulesForm.daily_n}＝{dailyTotal} 人</b></div>
-                          <div>全職 {fullNurses} 人 × 可上 {n - fullTimeOff} 天 ＝ {fullNurses * (n - fullTimeOff)}</div>
-                          <div>半職 {halfNurses} 人 × 可上 {n - partTimeOff} 天 ＝ {halfNurses * (n - partTimeOff)}</div>
+                          <div>預設每日需求：<b>D{dRules.daily_d}＋E{dRules.daily_e}＋N{dRules.daily_n}＝{defaultDaily} 人</b></div>
+                          <div>全職 {fullNurses} 人 × 可上 {n - dFullOff} 天 ＝ {fullNurses * (n - dFullOff)}</div>
+                          <div>半職 {halfNurses} 人 × 可上 {dPartWork} 天 ＝ {halfNurses * dPartWork}</div>
                           <div>可提供總人力：<b>{totalAvailable}</b></div>
-                          <div>需求總人力：<b>{totalRequired}</b></div>
+                          <div>需求總人力：<b>{totalRequired}</b>
+                            {specialCount > 0 && <span style={{ color:"#6b7280", fontSize:11 }}>（含 {specialCount} 個特殊日）</span>}
+                          </div>
                         </div>
+                        {/* 非臨床/請假類已填班別統計（僅顯示，不影響多餘人力計算） */}
+                        <div style={{ background:"rgba(0,0,0,0.04)", borderRadius:6, padding:"6px 10px", marginBottom:8, fontSize:12, color:"#374151" }}>
+                          非臨床／請假類已填班別（D／E／N／OFF／半 以外，如 會／公／書／V／病／延休／調移…）：<b>{specialShiftCount} 格</b>
+                        </div>
+                        {/* 特殊日期明細 */}
+                        {dRules.special_dates.filter(sd => sd.date && dCycleDays.includes(sd.date)).length > 0 && (
+                          <div style={{ background:"rgba(0,0,0,0.04)", borderRadius:6, padding:"6px 10px", marginBottom:8, fontSize:11, color:"#374151" }}>
+                            <b>特殊日期覆蓋：</b>
+                            {dRules.special_dates.filter(sd => sd.date && dCycleDays.includes(sd.date)).map(sd => (
+                              <span key={sd.date} style={{ marginLeft:8 }}>
+                                {sd.date}（D{sd.d}E{sd.e}N{sd.n}）
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                           <div style={{ fontSize:13, color:color.text, fontWeight:600 }}>
                             多餘人力 ＝ {totalAvailable} － {totalRequired} ＝
@@ -2762,11 +3228,12 @@ export default function AdminPage() {
 
                   {/* ── 順班規則說明 */}
                   <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:10, padding:"14px 16px", fontSize:13, color:"#1e40af", lineHeight:1.8 }}>
-                    <b>盡量順班 + 切換前盡量安排休息（固定啟用）</b><br />
+                    <b>順班規則：只罰「多餘換班」，必要換班不罰（固定啟用）</b><br />
                     <span style={{ color:"#374151" }}>
-                      • <b>輪班類（DE／EN／DN／DEN）：</b>同種班別連排後再換，切換時盡量先安排一天 OFF。<br />
-                      &emsp;懲罰值：<b>直接切換 +3</b>｜<b>隔 OFF 再切換 +2</b>｜同班種 ±0（跨週亦同）<br />
-                      • <b>固定D／E／N：</b>整週期幾乎全排同一種班，僅在人力缺口時才少數換班。
+                      • <b>必要換班</b>：輪班本來就要上多種班，一定要換的次數＝班種數−1（2種班1次、DEN 2次、固定班0次）→ <b>這些不罰</b>。<br />
+                      • <b>多餘換班</b>（超過必要數）：每次 <b>+1500</b>。<br />
+                      • <b>沒休就換</b>（直接切換、沒先排 OFF）：每次另加 <b>+500</b>（必要或多餘皆計，引導先休一天再換）。<br />
+                      &emsp;→ 必要+有休 <b>0</b>｜必要+沒休 <b>500</b>｜多餘+有休 <b>1500</b>｜多餘+沒休 <b>2000</b>
                     </span>
                   </div>
 
@@ -2775,25 +3242,29 @@ export default function AdminPage() {
                     <div className="setting-title">將套用的規則</div>
                     <div style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, color:"#374151", lineHeight:1.7 }}>
                       <div style={{ fontWeight:700, color:"#6b7280", fontSize:11 }}>── 硬規則 ──</div>
-                      <div>每班每日人數：D = <b>{rulesForm.daily_d}</b>、E = <b>{rulesForm.daily_e}</b>、N = <b>{rulesForm.daily_n}</b> 人</div>
-                      <div>反向班禁止：<b>{rulesForm.no_reverse_shift ? "✓" : "停用"}</b>　每週至少 <b>{rulesForm.one_in_seven ? "2" : "1"}</b> 天休假{rulesForm.one_in_seven ? "（一例一休）" : ""}　每週至多兩種班別：<b>{rulesForm.weekly_max_two_shifts ? "✓" : "停用"}</b></div>
-                      <div>連續上班上限 <b>{rulesForm.max_consecutive_work}</b> 天（含跨週計算）　連續 OFF 總上限 <b>{rulesForm.weekly_max_off_total}</b> 天</div>
-                      <div>自動休連續上限 <b>{rulesForm.weekly_max_off_auto}</b> 天　指定休不可覆蓋：<b>{rulesForm.lock_designated_off ? "✓" : "停用"}</b>　第一天鎖定：<b>{rulesForm.lock_first_day ? "✓" : "停用"}</b></div>
+                      <div>每班每日人數：D = <b>{dRules.daily_d}</b>、E = <b>{dRules.daily_e}</b>、N = <b>{dRules.daily_n}</b> 人
+                        {dRules.special_dates.filter(sd => sd.date && dCycleDays.includes(sd.date)).length > 0 && (
+                          <span style={{ marginLeft:8, color:"#b45309", fontWeight:600 }}>
+                            ＋特殊日期覆蓋：{dRules.special_dates.filter(sd => sd.date && dCycleDays.includes(sd.date)).map(sd =>
+                              `${sd.date}（D${sd.d}E${sd.e}N${sd.n}）`).join("、")}
+                          </span>
+                        )}
+                      </div>
+                      <div>反向班禁止：<b>✓ 固定啟用</b>　一例一休（每週至少 2 天休）：<b>{dRules.one_in_seven ? "✓" : "停用"}</b>　每週至多兩種班別：<b>✓ 固定啟用</b></div>
+                      <div>連續上班上限 <b>{dRules.max_consecutive_work}</b> 天（含跨週計算）　連續 OFF 總上限 <b>{dRules.weekly_max_off_total}</b> 天</div>
+                      <div>自動休連續上限 <b>{dRules.weekly_max_off_auto}</b> 天　指定休不可覆蓋：<b>{dRules.lock_designated_off ? "✓" : "停用"}</b>　第一天鎖定：<b>{dRules.lock_first_day ? "✓" : "停用"}</b></div>
+                      <div>每班每日人數恰好符合：<b>✓ 硬性</b>　每週至少 1 天休：<b>✓ 硬性</b>　一例一休（每週≥2天休）：<b>{dRules.one_in_seven ? "✓ 硬性" : "停用"}</b>　每班至少 1 位 leader＋2 位 leader/second：<b>✓ 硬性</b></div>
                       <div style={{ fontWeight:700, color:"#6b7280", fontSize:11, marginTop:2 }}>── 軟規則 ──</div>
-                      <div>固定班整週期排同班種（偏離懲罰 +20）　盡量順班 + 切換前安排休息（直接切換 +3｜隔 OFF +2）</div>
+                      <div>固定班偏離（+500/格）：{dRules.allow_fixed_deviation === false ? "不允許偏離（0 格，只排該班）" : "最多 2 格"}；公平優先版一律 0 格</div>
+                      <div>順班：只罰多餘換班（+1500/次）＋沒休就換（+500/次）；必要換班不罰　孤立上班日（+750）　班次比例 ±1 天彈性（+900）</div>
+                      <div>班次比例硬上限：全職／半職皆 各班種偏離理想 ±2 天（例 10:10 最極限 8:12；預填已超過時自動讓路）</div>
                     </div>
                   </div>
 
-                  {/* ── 選項 */}
+                  {/* ── 生成原則說明（內建：已填班別一律保留） */}
                   <div className="setting-section">
-                    <div className="setting-title">選項</div>
-                    <label className="fcheck">
-                      <input type="checkbox" checked={overwriteConfirmed}
-                        onChange={e => setOverwriteConfirmed(e.target.checked)} />
-                      <span style={{ fontSize:13 }}>覆蓋已確認送出的班別</span>
-                    </label>
-                    <div style={{ fontSize:12, color:"#9ca3af", marginTop:4 }}>
-                      未勾選：只填空白格子，已填班別（含未確認）一律保留。
+                    <div style={{ fontSize:12, color:"#6b7280" }}>
+                      已填班別（含未確認）一律保留，不得覆蓋，只填寫空白格子。將依序生成「分數最高版」「順班優先版」「公平優先版」三種供比較選擇。
                     </div>
                   </div>
 
@@ -2801,7 +3272,7 @@ export default function AdminPage() {
                   {confirmGenerate ? (
                     <div style={{ background:"#fef9c3", border:"1px solid #fde68a", borderRadius:10, padding:"12px 16px" }}>
                       <div style={{ fontSize:13, fontWeight:700, color:"#92400e", marginBottom:8 }}>
-                        確定要生成班表嗎？{overwriteConfirmed ? "（將覆蓋已確認班別）" : "（只填入空白格子）"}
+                        確定要生成班表嗎？將依序生成三個版本供比較（只填入空白格子，已填班別一律保留）
                       </div>
                       <div style={{ display:"flex", gap:8 }}>
                         <button className="btn btn-gray btn-sm" onClick={() => setConfirmGenerate(false)}>取消</button>
@@ -2814,7 +3285,7 @@ export default function AdminPage() {
                     <button
                       className="btn btn-primary"
                       style={{ alignSelf:"flex-start" }}
-                      disabled={!cycleIsSet || generating}
+                      disabled={!dCycleIsSet || generating}
                       onClick={() => setConfirmGenerate(true)}>
                       一鍵生成排班
                     </button>
@@ -2827,58 +3298,99 @@ export default function AdminPage() {
                       background: genResult.startsWith("✗") ? "#fef2f2" : "#eff6ff",
                       color:      genResult.startsWith("✗") ? "#dc2626" : "#1e40af",
                       border:     `1px solid ${genResult.startsWith("✗") ? "#fecaca" : "#bfdbfe"}`,
+                      whiteSpace: "pre-line", lineHeight: 1.8,
                     }}>{genResult}</div>
+                  )}
+                  {genDemand && !genResult.startsWith("✗") && (
+                    <div style={{ fontSize:12, color:"#374151", background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:8, padding:"8px 12px" }}>
+                      後端讀取設定確認：D={genDemand.daily_d}、E={genDemand.daily_e}、N={genDemand.daily_n}
+                      {genDemand.special_dates_count > 0 && `（＋${genDemand.special_dates_count} 個特殊日期）`}
+                      　總需求人力 = {genDemand.total_work_demand}
+                    </div>
+                  )}
+
+                  {/* ── 三版比較區 */}
+                  {Object.keys(genVersions).length > 0 && (
+                    <div style={{ display:"flex", gap:12, flexWrap:"wrap" }}>
+                      {GEN_PROFILES.map(p => {
+                        const v = genVersions[p.key];
+                        if (!v) return (
+                          <div key={p.key} style={{ flex:"1 1 260px", minWidth:240, border:"1px solid #e5e7eb", borderRadius:10, padding:"12px 14px", color:"#9ca3af", fontSize:13 }}>
+                            {p.label} 生成中…
+                          </div>
+                        );
+                        const isSelected = selectedProfile === p.key;
+                        return (
+                          <div key={p.key} style={{
+                            flex:"1 1 260px", minWidth:240, borderRadius:10, padding:"12px 14px",
+                            border: isSelected ? "2px solid #16a34a" : "1px solid #e5e7eb",
+                            background: isSelected ? "#f0fdf4" : "#fff",
+                          }}>
+                            <div style={{ fontSize:13, fontWeight:700, marginBottom:2 }}>{p.label}</div>
+                            <div style={{ fontSize:11, color:"#9ca3af", marginBottom:8 }}>{p.desc}</div>
+                            {v.error ? (
+                              <div style={{ fontSize:12, color:"#dc2626", whiteSpace:"pre-line" }}>✗ {v.error}</div>
+                            ) : (
+                              <>
+                                <div style={{ fontSize:12, color:"#374151", lineHeight:1.9 }}>
+                                  <div>多餘換班：<b>{v.metrics?.excess_switches ?? "—"}</b>（總換班 {v.metrics?.switches ?? "—"}，已扣必要）</div>
+                                  <div>孤立上班日：<b>{v.metrics?.isolated_days ?? "—"}</b></div>
+                                  <div>最大比例偏差：<b>{v.metrics?.max_ratio_dev ?? "—"}</b> 天</div>
+                                  {(v.warnings.length + v.anomalies.length + v.prefill_warnings.length) > 0 && (() => {
+                                    const allWarns = [...v.prefill_warnings, ...v.warnings, ...v.anomalies];
+                                    const open = !!warnOpen[p.key];
+                                    return (
+                                      <div>
+                                        <div
+                                          onClick={() => setWarnOpen(o => ({ ...o, [p.key]: !o[p.key] }))}
+                                          style={{ color:"#b45309", cursor:"pointer", userSelect:"none", fontWeight:600 }}
+                                        >
+                                          {open ? "▼" : "▶"} 警告：{allWarns.length} 則（點擊{open ? "收合" : "查看"}）
+                                        </div>
+                                        {open && (
+                                          <div style={{ marginTop:4, padding:"6px 8px", background:"#fffbeb", border:"1px solid #fde68a", borderRadius:6, maxHeight:180, overflowY:"auto" }}>
+                                            {allWarns.map((w, i) => (
+                                              <div key={i} style={{ fontSize:11, color:"#92400e", marginBottom:3, lineHeight:1.5 }}>• {w}</div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                                <div style={{ display:"flex", gap:6, marginTop:10, flexWrap:"wrap" }}>
+                                  <button className={`btn btn-sm ${isSelected ? "btn-primary" : "btn-gray"}`}
+                                    onClick={() => setSelectedProfile(p.key)}>
+                                    {isSelected ? "✓ 已選擇" : "選這版"}
+                                  </button>
+                                  <button className="btn btn-gray btn-sm" onClick={() => downloadVersionTemp(p.key)}>
+                                    匯出暫時班表
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
 
                   {/* ── 匯入確認區 */}
-                  {pendingSchedule && (
+                  {selectedProfile && genVersions[selectedProfile] && !genVersions[selectedProfile]!.error && (
                     <div style={{ background:"#f0fdf4", border:"1px solid #86efac", borderRadius:10, padding:"14px 16px" }}>
                       <div style={{ fontSize:13, fontWeight:700, color:"#15803d", marginBottom:6 }}>
-                        CP-SAT 計算完成，班表尚未寫入
+                        已選擇「{GEN_PROFILES.find(g => g.key === selectedProfile)?.label}」，班表尚未寫入
                       </div>
                       <div style={{ fontSize:12, color:"#166534", marginBottom:12 }}>
                         確認結果無誤後，點擊「匯入到班表」將班表寫入，再進行手動微調。
                       </div>
-                      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-                        <button
-                          className="btn btn-primary"
-                          onClick={runCommit}
-                          disabled={committing}
-                          style={{ background:"#16a34a", borderColor:"#15803d" }}>
-                          {committing ? "匯入中…" : "匯入到班表"}
-                        </button>
-                        <button
-                          className="btn btn-gray"
-                          disabled={committing}
-                          onClick={() => {
-                            if (!pendingSchedule) return;
-                            const restCodes = new Set(restShifts.map(s => s.code));
-                            const uidName: Record<string, string> = {};
-                            const uidHalf: Record<string, boolean> = {};
-                            nurseUsers.forEach(u => { uidName[u.uid] = u.name; uidHalf[u.uid] = u.halftime; });
-                            // 現有 DB 班別 → 人工填寫（粗體外框標記）
-                            const manualKeys = new Set(schedule.map(r => `${r.nurse_uid}_${r.date}`));
-                            const rows: { 姓名: string; 帳號: string; 日期: string; 班別: string; _bold: boolean }[] = [];
-                            nurseUsers.forEach(u => {
-                              const dateMap = pendingSchedule!.schedules[u.uid] ?? {};
-                              pendingSchedule!.cycle_dates.forEach(d => {
-                                const shift = dateMap[d] ?? "OFF";
-                                if (!shift || shift === "OFF") return;
-                                const isHalf = uidHalf[u.uid];
-                                const display = isHalf && restCodes.has(shift) ? "休假" : shift;
-                                rows.push({ 姓名: u.name, 帳號: u.uid, 日期: d, 班別: display, _bold: manualKeys.has(`${u.uid}_${d}`) });
-                              });
-                            });
-                            const wsData = [["姓名","帳號","日期","班別"], ...rows.map(r => [r.姓名, r.帳號, r.日期, r.班別])];
-                            const ws = XLSX.utils.aoa_to_sheet(wsData);
-                            ws["!cols"] = [{wch:14},{wch:14},{wch:14},{wch:10}];
-                            const wb = XLSX.utils.book_new();
-                            XLSX.utils.book_append_sheet(wb, ws, "暫時班表");
-                            XLSX.writeFile(wb, `暫時班表_${cycle.start_date}_${cycle.end_date}.xlsx`);
-                          }}>
-                          匯出暫時班表
-                        </button>
-                      </div>
+                      <button
+                        className="btn btn-primary"
+                        onClick={runCommit}
+                        disabled={committing}
+                        style={{ background:"#16a34a", borderColor:"#15803d" }}>
+                        {committing ? "匯入中…" : "匯入到班表"}
+                      </button>
                     </div>
                   )}
 
@@ -2892,22 +3404,33 @@ export default function AdminPage() {
                     }}>{commitResult}</div>
                   )}
 
-                  {/* ── 警告（人力不足縮減應休） */}
-                  {genWarnings.length > 0 && (
-                    <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, padding:"12px 16px", fontSize:13 }}>
-                      <div style={{ fontWeight:700, color:"#92400e", marginBottom:6 }}>人力不足警告</div>
-                      {genWarnings.map((w, i) => <div key={i} style={{ color:"#92400e" }}>{w}</div>)}
-                      <div style={{ fontSize:12, color:"#b45309", marginTop:6 }}>應休天數已平均縮減，請確認後再送出確認。</div>
-                    </div>
-                  )}
-
-                  {/* ── 異常標示 */}
-                  {genAnomalies.length > 0 && (
-                    <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"12px 16px", fontSize:13 }}>
-                      <div style={{ fontWeight:700, color:"#dc2626", marginBottom:6 }}>異常標示</div>
-                      {genAnomalies.map((a, i) => <div key={i} style={{ color:"#dc2626" }}>{a}</div>)}
-                    </div>
-                  )}
+                  {/* ── 選定版本的詳細警告 */}
+                  {selectedProfile && genVersions[selectedProfile] && (() => {
+                    const v = genVersions[selectedProfile]!;
+                    return (
+                      <>
+                        {v.prefill_warnings.length > 0 && (
+                          <div style={{ background:"#fefce8", border:"1px solid #fde047", borderRadius:10, padding:"12px 16px", fontSize:13 }}>
+                            <div style={{ fontWeight:700, color:"#854d0e", marginBottom:6 }}>⚠ 預填班別與輪班屬性不符（已保留，CP-SAT 將於後續天數導正）</div>
+                            {v.prefill_warnings.map((w, i) => <div key={i} style={{ color:"#854d0e", marginBottom:2 }}>{w}</div>)}
+                          </div>
+                        )}
+                        {v.warnings.length > 0 && (
+                          <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, padding:"12px 16px", fontSize:13 }}>
+                            <div style={{ fontWeight:700, color:"#92400e", marginBottom:6 }}>人力不足警告</div>
+                            {v.warnings.map((w, i) => <div key={i} style={{ color:"#92400e" }}>{w}</div>)}
+                            <div style={{ fontSize:12, color:"#b45309", marginTop:6 }}>應休天數已平均縮減，請確認後再送出確認。</div>
+                          </div>
+                        )}
+                        {v.anomalies.length > 0 && (
+                          <div style={{ background:"#fef2f2", border:"1px solid #fecaca", borderRadius:10, padding:"12px 16px", fontSize:13 }}>
+                            <div style={{ fontWeight:700, color:"#dc2626", marginBottom:6 }}>異常標示</div>
+                            {v.anomalies.map((a, i) => <div key={i} style={{ color:"#dc2626" }}>{a}</div>)}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {/* ── 匯出區塊 */}
                   <div className="setting-section">
@@ -2916,7 +3439,7 @@ export default function AdminPage() {
                       <div>
                         <button
                           className="btn btn-gray"
-                          disabled={!cycleIsSet}
+                          disabled={!dCycleIsSet}
                           onClick={() => downloadExport("preview")}>
                           匯出預假狀態
                         </button>
@@ -2925,7 +3448,7 @@ export default function AdminPage() {
                       <div>
                         <button
                           className="btn btn-gray"
-                          disabled={!cycleIsSet || !hasGenerated}
+                          disabled={!dCycleIsSet || !hasGenerated}
                           onClick={() => downloadExport("schedule")}>
                           匯出完整班表
                         </button>
@@ -2940,6 +3463,72 @@ export default function AdminPage() {
           </div>
           );
         })()}
+
+        {/* ── Tab: 首頁模組 */}
+        {tab === "home_modules" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth:640 }}>
+            <div className="card">
+              <div className="card-head"><div style={{ fontSize:16, fontWeight:700 }}>首頁模組卡片</div></div>
+              <div className="card-body">
+                <div className="fl">
+                  <div style={{ fontSize:12, color:"#9ca3af", marginBottom:4 }}>
+                    登入後首頁的模組卡片。可自訂各卡片的大標、小標、圖片；留空欄位用預設。
+                  </div>
+                  {moduleCfgs.filter(m => m.key !== "data").map(m => {
+                    const meta = DEFAULT_MODULE_META.find(d => d.key === m.key);
+                    const disabled = m.key === "data";
+                    return (
+                      <div key={m.key} className="setting-section" style={{ border:"1px solid #eef2f7", borderRadius:12, padding:14 }}>
+                        <div className="setting-title">
+                          {meta?.title ?? m.key}
+                          {disabled && <span style={{ fontSize:11, color:"#94a3b8", fontWeight:600, marginLeft:6 }}>（即將推出，卡片顯示但暫不可點）</span>}
+                        </div>
+                        {/* 預覽 */}
+                        <div style={{ display:"flex", alignItems:"center", gap:14, padding:"12px 10px", background:"#f0f4f8", borderRadius:12, marginBottom:12 }}>
+                          <div style={{ width:64, height:64, borderRadius:"22.37%", background: m.image ? "transparent" : (m.key==="schedule"?"#e0edff":"#e7f6ec"), display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", fontSize:30, flexShrink:0 }}>
+                            {m.image ? <img src={m.image} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : <span>{m.key==="schedule"?"🗓️":"🗂️"}</span>}
+                          </div>
+                          <div>
+                            <div style={{ fontSize:16, fontWeight:800, color:"#0f172a" }}>{m.title || meta?.title}</div>
+                            <div style={{ fontSize:12, color:"#94a3b8", marginTop:2 }}>{m.tagline || meta?.tagline}</div>
+                          </div>
+                        </div>
+                        {/* 圖片 */}
+                        <div style={{ marginBottom:10 }}>
+                          <div style={{ fontSize:12, fontWeight:600, color:"#374151", marginBottom:4 }}>🖼 圖片（留空＝預設圖示）</div>
+                          <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+                            <input type="file" accept="image/*"
+                              onChange={e => { const f = e.target.files?.[0]; if (f) onModuleImagePick(m.key, f); e.currentTarget.value = ""; }} />
+                            {m.image && <button className="btn btn-gray btn-sm" onClick={() => setModuleCfgs(p => p.map(x => x.key===m.key ? { ...x, image:"" } : x))}>移除圖片（回預設）</button>}
+                          </div>
+                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:4 }}>建議正方形，小於 800KB</div>
+                        </div>
+                        {/* 大標 */}
+                        <div style={{ marginBottom:10 }}>
+                          <div style={{ fontSize:12, fontWeight:600, color:"#374151", marginBottom:4 }}>大標</div>
+                          <input className="finput" style={{ maxWidth:360 }} placeholder={meta?.title}
+                            value={m.title} onChange={e => setModuleCfgs(p => p.map(x => x.key===m.key ? { ...x, title:e.target.value } : x))} />
+                        </div>
+                        {/* 小標 */}
+                        <div>
+                          <div style={{ fontSize:12, fontWeight:600, color:"#374151", marginBottom:4 }}>小標</div>
+                          <input className="finput" style={{ maxWidth:360 }} placeholder={meta?.tagline}
+                            value={m.tagline} onChange={e => setModuleCfgs(p => p.map(x => x.key===m.key ? { ...x, tagline:e.target.value } : x))} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+                    <button className="btn btn-primary" onClick={saveModuleConfig} disabled={savingModules}>
+                      {savingModules ? "儲存中…" : "儲存首頁模組"}
+                    </button>
+                    <span style={{ fontSize:12, color:"#9ca3af" }}>儲存後下次進首頁即套用</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ══════════════════════════════════
             Tab: 操作紀錄
@@ -3037,86 +3626,47 @@ export default function AdminPage() {
 
       </div>
 
-      {/* ── 回復到預假狀態確認 Dialog */}
+      {/* ── 班表還原三選項確認 Dialog */}
       {revertConfirm && (
         <Dialog
-          title="回復到預假狀態"
+          title={
+            revertConfirm === "clear"         ? "清除所有 CP-SAT 生成內容" :
+            revertConfirm === "clearCycle"    ? "清除預班週期內所有填寫內容" :
+            revertConfirm === "restore"       ? "恢復到上次 CP-SAT 生成的內容" :
+            revertConfirm === "restoreManual" ? "恢復確認送出及待確認的內容" :
+            "清除半年之外所有班表"
+          }
           body={
             <div style={{ fontSize:13, color:"#374151", lineHeight:1.6 }}>
-              確定要回復到預假狀態嗎？<br />
-              CP-SAT 生成的班別將全部清除，此動作無法復原。
+              {revertConfirm === "clear" && <>將清除本次一鍵生成新增的班別，只保留人員原本填寫的內容。執行前會自動備份，可用「恢復確認送出及待確認的內容」還原。</>}
+              {revertConfirm === "clearCycle" && <>將清除預班週期內<b>所有</b>班別（含已確認）。執行前會自動備份，可用「恢復確認送出及待確認的內容」還原。</>}
+              {revertConfirm === "restore" && <>將刪除週期內目前所有班別，還原成上次一鍵生成當下的完整結果。執行前會自動備份目前內容。</>}
+              {revertConfirm === "restoreManual" && <>將刪除週期內目前所有班別，還原成最近一次清除/還原操作之前的內容（含確認送出與待確認的班別）。</>}
+              {revertConfirm === "purge" && <span style={{ color:"#dc2626" }}>將永久刪除半年（182 天）以前的所有班表資料，釋放資料庫空間。此動作無法復原，且與目前排班週期無關。</span>}
             </div>
           }
           actions={[
-            { label: "取消", onClick: () => setRevertConfirm(false) },
-            { label: reverting ? "回復中…" : "確定回復", danger: true, onClick: async () => {
-              setRevertConfirm(false);
+            { label: "取消", onClick: () => setRevertConfirm(null) },
+            { label: reverting ? "處理中…" : "確定執行", danger: true, onClick: async () => {
+              const action = revertConfirm;
+              setRevertConfirm(null);
               setReverting(true);
               setRevertResult("");
+              const endpoint =
+                action === "clear"         ? "/schedule/clear-generated" :
+                action === "clearCycle"    ? "/schedule/clear-cycle" :
+                action === "restore"       ? "/schedule/restore-generated" :
+                action === "restoreManual" ? "/schedule/restore-manual" :
+                "/schedule/purge-old";
               try {
-                // ── 取得 CP-SAT 生成格子清單（三層優先序）
-                let generatedKeySet: Set<string> | null = null;
-
-                // 層 1：localStorage（本次 commit 時前端存入）
-                const lsKeys: string[] = JSON.parse(localStorage.getItem("cpsat_generated_keys") ?? "[]");
-                if (lsKeys.length > 0) {
-                  generatedKeySet = new Set(lsKeys);
-                }
-
-                // 層 2：後端 rules.last_generated_keys（由 /schedule/commit 存入 DB）
-                if (!generatedKeySet) {
-                  try {
-                    const { data: rd } = await api.get("/rules");
-                    const serverKeys: string[] = rd?.rules?.last_generated_keys ?? [];
-                    if (serverKeys.length > 0) generatedKeySet = new Set(serverKeys);
-                  } catch { /* 忽略，繼續 */ }
-                }
-
-                let toDelete: ShiftRow[] = [];
-
-                if (generatedKeySet) {
-                  // 用精確的 key 清單找出要刪除的格子（不管 confirmed 狀態）
-                  toDelete = scheduleRef.current.filter(r =>
-                    r.shift && generatedKeySet!.has(`${r.nurse_uid}_${r.date}`)
-                  );
-                } else {
-                  // 層 3 備用：找本週期內所有 confirmed=false 的班別
-                  toDelete = scheduleRef.current.filter(
-                    r => cycleDays.includes(r.date) && !r.confirmed && r.shift
-                  );
-                }
-
-                if (toDelete.length === 0) {
-                  if (!generatedKeySet) {
-                    setRevertResult("✗ 找不到 CP-SAT 生成紀錄（請確認已執行「匯入到班表」，且後端已更新到最新版本）");
-                  } else {
-                    setRevertResult("✓ 無需回復（CP-SAT 生成的班別已全部清除）");
-                  }
-                  setReverting(false);
-                  return;
-                }
-
-                // 逐一清除
-                let failed = 0;
-                for (const r of toDelete) {
-                  try {
-                    await api.post("/schedule/shift", { nurse_uid: r.nurse_uid, date: r.date, shift: null });
-                  } catch {
-                    failed++;
-                  }
-                }
-
-                if (failed > 0) {
-                  setRevertResult(`✗ 部分回復失敗（${failed}/${toDelete.length} 格），請重試`);
-                } else {
-                  setRevertResult(`✓ 已回復到預假狀態（清除 ${toDelete.length} 格）`);
-                  localStorage.removeItem("cpsat_generated_keys");
-                  localStorage.removeItem("cpsat_generated_cycle");
-                }
-                await fetchSchedule();
+                const { data } = await api.post(endpoint);
+                setRevertResult(data.message ?? "✓ 完成");
+                if (action !== "purge") fetchSchedule();
               } catch (err: any) {
-                setRevertResult("✗ " + (err.response?.data?.detail ?? err.message ?? "回復失敗"));
-              } finally { setReverting(false); }
+                setRevertResult("✗ " + (err.response?.data?.detail ?? err.message ?? "操作失敗"));
+              } finally {
+                setReverting(false);
+              }
             }},
           ]}
         />
@@ -3135,8 +3685,18 @@ export default function AdminPage() {
             // 先讀取再關閉，避免 popup 被清空後取不到值
             const nurseUid = popup!.nurseUid;
             const date     = popup!.date;
+            const nurseName = popup!.nurseName;
             console.log("[onSelect] shift=", shift, "nurseUid=", nurseUid, "date=", date);
             setPopup(null);
+            // 屬性衝突警告
+            if (shift) {
+              const nurse = nurseUsers.find(u => u.uid === nurseUid);
+              if (nurse && isAttrConflict(shift, nurse.attr)) {
+                const allowed = attrShifts(nurse.attr);
+                const allowedLabel = allowed.length ? allowed.join("/") : nurse.attr;
+                showToast(`⚠ ${nurseName} 的輪班屬性為 ${nurse.attr}（只排 ${allowedLabel}），${date} 填入 ${shift} 與屬性不符，CP-SAT 將保留此格並於後續導正`, false);
+              }
+            }
             await updateShift(nurseUid, date, shift);
           }}
           onClose={() => setPopup(null)}
@@ -3146,7 +3706,7 @@ export default function AdminPage() {
       {/* ── 修改已確認格子警告 */}
       {confirmEdit && (
         <Dialog
-          title="確認修改已送出的班別？"
+          title="你真的要修改已送出的班別？"
           body={<>已確認的班別（{confirmEdit.nurseName}　{confirmEdit.date}）修改後將回到<b>待確認</b>狀態，需重新送出確認。</>}
           actions={[
             { label: "取消", onClick: () => setConfirmEdit(null) },
@@ -3179,7 +3739,9 @@ export default function AdminPage() {
                 </div>
                 <div>
                   <label className="flabel">輪班屬性</label>
-                  <select className="finput" value={editForm.attr ?? "輪班DEN"} onChange={e => setEditForm(p=>({...p,attr:e.target.value}))}>
+                  <select className="finput" value={editForm.attr ?? "輪班DEN"} disabled={editForm.admin_staff}
+                    style={editForm.admin_staff ? disabledSelStyle : undefined}
+                    onChange={e => setEditForm(p=>({...p,attr:e.target.value}))}>
                     <option value="固定D">固定D（幾乎只排白班）</option>
                     <option value="固定E">固定E（幾乎只排小夜）</option>
                     <option value="固定N">固定N（幾乎只排大夜）</option>
@@ -3193,7 +3755,9 @@ export default function AdminPage() {
               <div className="frow">
                 <div>
                   <label className="flabel">層級</label>
-                  <select className="finput" value={editForm.level ?? ""} onChange={e => setEditForm(p=>({...p,level:e.target.value}))}>
+                  <select className="finput" value={editForm.level ?? ""} disabled={editForm.admin_staff}
+                    style={editForm.admin_staff ? disabledSelStyle : undefined}
+                    onChange={e => setEditForm(p=>({...p,level:e.target.value}))}>
                     <option value="leader">leader</option>
                     <option value="second">second</option>
                     <option value="member">member</option>
@@ -3202,7 +3766,9 @@ export default function AdminPage() {
                 {editUser && editUser.role !== "superadmin" && (
                   <div>
                     <label className="flabel">角色</label>
-                    <select className="finput" value={editForm.role ?? ""} onChange={e => setEditForm(p=>({...p,role:e.target.value}))}>
+                    <select className="finput" value={editForm.role ?? ""} disabled={editForm.admin_staff}
+                      style={editForm.admin_staff ? disabledSelStyle : undefined}
+                      onChange={e => setEditForm(p=>({...p,role:e.target.value}))}>
                       <option value="nurse">護理師</option>
                       <option value="dual">管理員兼護理師</option>
                       <option value="admin">管理員</option>
@@ -3216,8 +3782,16 @@ export default function AdminPage() {
                 <textarea className="finput" value={editForm.note ?? ""} onChange={e => setEditForm(p=>({...p,note:e.target.value}))} placeholder="選填，護理師也可在個人設定查看及填寫" rows={3} style={{ resize:"vertical", minHeight:64 }} />
               </div>
               <label className="fcheck">
-                <input type="checkbox" checked={editForm.halftime ?? false} onChange={e => setEditForm(p=>({...p,halftime:e.target.checked}))} />
-                <span style={{ fontSize:13 }}>半職人員（以半職公式計算應休天數）</span>
+                <input type="checkbox" checked={editForm.halftime ?? false} disabled={editForm.admin_staff}
+                  onChange={e => setEditForm(p=>({...p,halftime:e.target.checked}))} />
+                <span style={{ fontSize:13, color: editForm.admin_staff ? "#9ca3af" : undefined }}>半職人員（以半職公式計算應休天數）</span>
+              </label>
+              <label className="fcheck">
+                <input type="checkbox" checked={editForm.admin_staff ?? false}
+                  onChange={e => setEditForm(p=> e.target.checked
+                    ? ({...p, admin_staff:true, role:"nurse", level:"member", halftime:false})
+                    : ({...p, admin_staff:false}))} />
+                <span style={{ fontSize:13 }}>行政人員（可預班，但不參與一鍵生成）</span>
               </label>
               <div style={{ borderTop:"1px solid #f3f4f6", paddingTop:14 }}>
                 <label className="flabel">重設密碼（留空則不變更）</label>

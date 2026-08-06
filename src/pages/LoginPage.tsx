@@ -24,12 +24,12 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const { data } = await api.post("/auth/login", { uid: uid.trim(), password });
+      const { data } = await api.post("/auth/login", { uid: uid.trim().toLowerCase(), password });
       saveAuth({ uid: data.uid, name: data.name, role: data.role, token: data.access_token });
-      // nurse 和 dual 進護理師介面；admin / superadmin 進後台
-      nav(["nurse", "dual"].includes(data.role) ? "/nurse" : "/admin");
+      // 登入後一律進首頁模組選擇畫面，由使用者選擇要進入的系統
+      nav("/home");
     } catch (err: any) {
-      setError(err.response?.data?.detail || "帳號或密碼錯誤，請重新輸入");
+      setError(err.response?.data?.detail || "喔喔!! 帳號或密碼錯了");
     } finally {
       setLoading(false);
     }
@@ -82,7 +82,7 @@ export default function LoginPage() {
         .lp-logo-sub {
           font-size: 12px;
           color: #94a3b8;
-          margin-top: -6px;
+          margin-top: 4px;
         }
         .lp-label {
           display: block;
@@ -222,19 +222,6 @@ export default function LoginPage() {
 
       <div className="lp-root">
         <div className="lp-card">
-          {/* Logo */}
-          <div className="lp-logo">
-            <div className="lp-logo-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-              </svg>
-            </div>
-            <div>
-              <div className="lp-logo-title">護理排班系統</div>
-              <div className="lp-logo-sub">Nursing Shift Management</div>
-            </div>
-          </div>
-
           <form onSubmit={handleSubmit} autoComplete="off">
             {/* 帳號 */}
             <div className="lp-field">
@@ -283,7 +270,7 @@ export default function LoginPage() {
                 <span className="lp-hint-icon">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                 </span>
-                <span>帳號與密碼的大小寫有差，請注意</span>
+                <span>密碼有區分大小寫，請注意</span>
               </div>
 
               {/* 大寫鎖定警示（動態出現） */}

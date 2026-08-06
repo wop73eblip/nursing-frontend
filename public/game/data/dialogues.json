@@ -1,0 +1,14 @@
+{
+  "door_no_card": {
+    "start": "a",
+    "nodes": { "a": { "who": "🚪 大門", "text": "沒刷職員證", "next": null } }
+  },
+  "need_select_card": {
+    "start": "a",
+    "nodes": { "a": { "who": "🔒 讀卡機", "text": "請先在下方道具欄點選「職員證」，再刷卡。", "next": null } }
+  },
+  "got_cabinet_key": {
+    "start": "a",
+    "nodes": { "a": { "who": "🗝️ 你", "text": "你撿起了一把 <b>會議室櫃子鑰匙</b>。", "give": "conference_cabinet_key", "next": null } }
+  }
+}

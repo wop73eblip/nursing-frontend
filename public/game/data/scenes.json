@@ -1,0 +1,75 @@
+{
+  "gate_front_closed": {
+    "image": "gate_front_closed.jpg",
+    "hotspots": [
+      { "id": "door",        "rect": [338, 420, 784, 1058], "action": "door_locked" },
+      { "id": "card_reader", "rect": [853, 656, 884, 701],  "action": "swipe_card" }
+    ],
+    "exits": {}
+  },
+  "gate_front_open": {
+    "image": "gate_front_open.jpg",
+    "hotspots": [
+      { "id": "forward", "rect": [338, 420, 784, 1058], "goto": "2nd_gate_front" }
+    ],
+    "exits": {}
+  },
+  "2nd_gate_front": {
+    "image": "2nd_gate_front.jpg",
+    "hotspots": [],
+    "exits": { "right": "pi_right_aisle", "back": "gate_front_open" }
+  },
+  "pi_right_aisle": {
+    "image": "pi_right_aisle.jpg",
+    "hotspots": [
+      { "id": "right", "rect": [936, 479, 1076, 1004], "goto": "head_nurse_room" },
+      { "id": "forward", "rect": [401, 429, 700, 1069], "goto": "pi_conference_room" }
+    ],
+    "exits": { "back": "2nd_gate_front" }
+  },
+  "pi_conference_room": {
+    "image": "pi_conference_room.jpg",
+    "hotspots": [
+      { "id": "forward", "rect": [702, 725, 889, 1060], "goto": "conference_room_front" }
+    ],
+    "exits": { "back": "pi_right_aisle" }
+  },
+  "conference_room_front": {
+    "image": "conference_room_front.jpg",
+    "hotspots": [],
+    "exits": { "right": "conference_room_right", "back": "pi_conference_room" }
+  },
+  "conference_room_right": {
+    "image": "conference_room_right.jpg",
+    "hotspots": [
+      { "id": "forward", "rect": [853, 517, 1057, 722], "goto": "conference_room_pc" }
+    ],
+    "exits": { "back": "conference_room_front" }
+  },
+  "conference_room_pc": {
+    "image": "conference_room_pc.jpg",
+    "hotspots": [
+      { "id": "screen", "rect": [181, 92, 929, 697], "action": "open_pc_terminal" }
+    ],
+    "exits": { "back": "conference_room_right" }
+  },
+  "conference_room_pc-cd": {
+    "image": "conference_room_pc-cd.jpg",
+    "hotspots": [
+      { "id": "cabinet_key", "rect": [244, 797, 319, 896], "action": "take_cabinet_key" }
+    ],
+    "exits": { "back": "conference_room_right" }
+  },
+  "conference_room_pc-nocd": {
+    "image": "conference_room_pc-nocd.jpg",
+    "hotspots": [],
+    "exits": { "back": "conference_room_right" }
+  },
+  "head_nurse_room": {
+    "image": "head_nurse_room.jpg",
+    "hotspots": [
+      { "id": "message_board", "rect": [254, 335, 936, 882], "action": "open_message_board" }
+    ],
+    "exits": { "back": "pi_right_aisle" }
+  }
+}

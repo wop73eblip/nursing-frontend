@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import dayjs from "dayjs";
 import api from "../api";
 import { getAuth, clearAuth } from "../auth";
 
 const DEFAULT_WORK = ["D", "E", "N", "會", "公", "書記"];
-const DEFAULT_OFF  = ["OFF", "V", "半", "喪", "員", "延休", "補休", "調移"];
+const DEFAULT_REST = ["OFF", "半"];                              // 應休類
+const DEFAULT_OFF  = ["V", "喪", "員", "延休", "補休", "調移"];   // 放假/調整類
 const DOW_ZH       = ["日","一","二","三","四","五","六"];
 
 function isOffFn(s: string, offShifts: string[]) { return offShifts.includes(s); }
@@ -19,16 +19,28 @@ function attrShort(attr: string): string {
   return attr;
 }
 
+const ATTR_ALLOWED: Record<string, string[]> = {
+  "輪班DE":  ["D","E"],
+  "輪班EN":  ["E","N"],
+  "輪班DN":  ["D","N"],
+  "輪班DEN": ["D","E","N"],
+  "固定D":   ["D"],
+  "固定E":   ["E"],
+  "固定N":   ["N"],
+  "白班":    ["D"],
+  "小夜":    ["E"],
+  "大夜":    ["N"],
+};
+
 function attrMismatchMsg(shift: string, attr: string, offCodes: string[]): string | null {
   if (!shift || !attr) return null;
-  const ok = [...offCodes, "公","會","書記"];
-  if (ok.includes(shift)) return null;
-  if ((attr === "固定D" || attr === "白班") && shift !== "D")
-    return `選取的班別與輪班屬性「${attr}」不符`;
-  if ((attr === "固定E" || attr === "小夜") && shift !== "E")
-    return `選取的班別與輪班屬性「${attr}」不符`;
-  if ((attr === "固定N" || attr === "大夜") && shift !== "N")
-    return `選取的班別與輪班屬性「${attr}」不符`;
+  if (offCodes.includes(shift)) return null;
+  // 會/公/書記 性質等同 D
+  const effectiveShift = ["會", "公", "書記"].includes(shift) ? "D" : shift;
+  const allowed = ATTR_ALLOWED[attr];
+  if (!allowed) return null; // 未知屬性，不標示
+  if (!allowed.includes(effectiveShift))
+    return `選取的班別與輪班屬性「${attr}」不符（允許：${allowed.join("/")}）`;
   return null;
 }
 
@@ -47,7 +59,9 @@ function cellStyleFor(
   } else if (!shift) {
     cls += " is-empty";
   } else if (mismatch) {
-    style = { background: "#fef9c3", borderColor: "#eab308", color: shiftColor(shift, offShifts) };
+    style = confirmed
+      ? { background: "#854d0e", borderColor: "#713f12", color: "#fff" }
+      : { background: "#fef9c3", borderColor: "#eab308", color: "#713f12" };
   } else if (isAdminFilled) {
     // 管理員填入：藍色系
     style = confirmed
@@ -64,12 +78,13 @@ function cellStyleFor(
 
 // ─── 班別選擇 Modal
 function ShiftPopup({
-  date, current, userAttr, workShifts, offShifts, onSelect, onClose,
+  date, current, userAttr, workShifts, restShifts, offShifts, onSelect, onClose,
 }: {
   date: string;
   current: string;
   userAttr: string;
   workShifts: string[];
+  restShifts: string[];
   offShifts: string[];
   onSelect: (s: string | null) => void;
   onClose: () => void;
@@ -88,7 +103,7 @@ function ShiftPopup({
   }, [onClose, warnShift]);
 
   function handleClick(s: string) {
-    const warn = attrMismatchMsg(s, userAttr, offShifts);
+    const warn = attrMismatchMsg(s, userAttr, [...restShifts, ...offShifts]);
     if (warn) {
       setWarnShift(s);
     } else {
@@ -148,6 +163,16 @@ function ShiftPopup({
                   ...btnBase, color: "#111827",
                   border: current === s ? "2px solid #2563eb" : "1.5px solid #e5e7eb",
                   background: current === s ? "#eff6ff" : "#f9fafb",
+                }}>{s}</button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginBottom: 6 }}>應休</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+              {restShifts.map(s => (
+                <button key={s} onClick={() => handleClick(s)} style={{
+                  ...btnBase, color: "#dc2626",
+                  border: current === s ? "2px solid #dc2626" : "1.5px solid #fecaca",
+                  background: current === s ? "#fef2f2" : "#fff5f5",
                 }}>{s}</button>
               ))}
             </div>
@@ -213,17 +238,18 @@ function Dialog({
 
 // ─── 主頁面
 type Entry = { shift: string; confirmed: boolean; updated_by?: string };
-type NurseInfo = { uid: string; name: string; attr: string; level: string; role: string; sort_order: number; halftime: boolean };
+type NurseInfo = { uid: string; name: string; attr: string; level: string; role: string; sort_order: number; halftime: boolean; admin_staff?: boolean };
 
 export default function NursePage() {
-  const nav  = useNavigate();
   const user = getAuth()!;
   const isDual = ["dual", "admin", "superadmin"].includes(user.role);
   const isSuperAdmin = user.role === "superadmin";
 
   const [ym, setYm] = useState(dayjs().format("YYYY-MM"));
   const [workShifts, setWorkShifts] = useState<string[]>(DEFAULT_WORK);
+  const [restShifts, setRestShifts] = useState<string[]>(DEFAULT_REST);
   const [offShifts, setOffShifts]   = useState<string[]>(DEFAULT_OFF);
+  const allOffShifts = [...restShifts, ...offShifts];   // 應休 + 放假調整（計入「休假人數」與紅字著色）
   const [cycleRange, setCycleRange]  = useState<{ start: string; end: string } | null>(null);
 
   // 全員資料
@@ -236,9 +262,15 @@ export default function NursePage() {
   const [confirmEdit, setConfirmEdit] = useState<{ date: string } | null>(null);
   const [leaveDialog, setLeaveDialog] = useState<{ action: () => void } | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [clearConfirm, setClearConfirm] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [pendingDeletes, setPendingDeletes] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState("");
+  const [toastErr, setToastErr] = useState(false);
   const toastRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lockFirstDay, setLockFirstDay] = useState(true);
+  const [restrictFirstWeekend, setRestrictFirstWeekend] = useState(true);
+  const [maxPredDays, setMaxPredDays] = useState(0);   // 預班上限（白班/小夜/大夜/OFF 天數），0＝不限
 
   // 滑動選取
   const swipeRef  = useRef<{ startDate: string; dates: Set<string>; active: boolean } | null>(null);
@@ -267,6 +299,7 @@ export default function NursePage() {
   const stickyScrollRef = useRef<HTMLDivElement>(null);
   const [showStickyHdr, setShowStickyHdr] = useState(false);
   const [colWidths, setColWidths]         = useState<number[]>([]);
+  const [stickyBox, setStickyBox]         = useState<{ left: number; width: number }>({ left: 0, width: 0 });
 
   // 頁籤
   const [npTab, setNpTab] = useState<"schedule"|"settings">("schedule");
@@ -278,7 +311,6 @@ export default function NursePage() {
   const [pw1, setPw1] = useState("");
   const [pw2, setPw2] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [sMsg, setSMsg] = useState({ text: "", ok: true });
 
   const year  = parseInt(ym.slice(0, 4));
   const month = parseInt(ym.slice(5, 7));
@@ -308,8 +340,38 @@ export default function NursePage() {
   const myInfo = nurses.find(n => n.uid === user.uid);
   const myAttr = myInfo?.attr ?? attr;
 
+  // 首個週末限制：全職不可將「週期第一個週六 + 第一個週日」同時預成 OFF（半職不受限，只算 OFF）
+  const firstSatDate = days.find(d => dayjs(d).day() === 6);
+  const firstSunDate = days.find(d => dayjs(d).day() === 0);
+  const iAmFullTime = !(myInfo?.halftime);
+  const iAmAdminStaff = !!myInfo?.admin_staff;   // 行政人員：個人設定只留備註與修改密碼
+  // 檢查：把 datesToOff 這些日期填成 OFF 後，第一個週六與週日是否會「同時為 OFF」
+  function firstWeekendBlocked(datesToOff: string[]): boolean {
+    if (!restrictFirstWeekend || !iAmFullTime) return false;
+    if (!firstSatDate || !firstSunDate) return false;
+    const s = new Set(datesToOff);
+    const satOff = s.has(firstSatDate) || mySchedule[firstSatDate]?.shift === "OFF";
+    const sunOff = s.has(firstSunDate) || mySchedule[firstSunDate]?.shift === "OFF";
+    return satOff && sunOff;
+  }
+
+  // 預班上限：計入的班別＝白班/小夜/大夜（工作班）或 OFF；半、放假調整類不計。只限全職
+  // 只計算「本次週期內（days）」的格子，避免把上週參考、其他月份的舊班別也算進去
+  const isCountedShift = (s?: string | null) => !!s && (workShifts.includes(s) || s === "OFF");
+  const cycleDaySet = new Set(days);
+  const countedPredDays = Object.entries(mySchedule)
+    .filter(([d, v]) => cycleDaySet.has(d) && isCountedShift(v.shift)).length;
+  // 檢查：把 dates 填成 newShift 後，計入格數是否超過上限
+  function predLimitBlocked(dates: string[], newShift: string | null): boolean {
+    if (!iAmFullTime || maxPredDays <= 0) return false;
+    if (!isCountedShift(newShift)) return false;         // 填半/V/清除 不受限
+    // 只看本週期內、且原本「未計入」的日期才會讓計數 +1
+    const adds = dates.filter(d => cycleDaySet.has(d) && !isCountedShift(mySchedule[d]?.shift)).length;
+    return countedPredDays + adds > maxPredDays;
+  }
+
   // 有未確認的格子
-  const hasUnconfirmed = Object.values(mySchedule).some(v => !v.confirmed);
+  const hasUnconfirmed = Object.values(mySchedule).some(v => !v.confirmed) || pendingDeletes.size > 0;
 
   // 我的班別統計
   const myStats: Record<string, number> = {};
@@ -320,7 +382,7 @@ export default function NursePage() {
   for (const d of days) {
     dailyOff[d] = nurses.filter(n => {
       const s = allSched[n.uid]?.[d]?.shift;
-      return s && isOffFn(s, offShifts);
+      return s && isOffFn(s, allOffShifts);
     }).length;
   }
 
@@ -340,6 +402,12 @@ export default function NursePage() {
       const ths = Array.from(row.querySelectorAll("th"));
       if (!ths.length || ths[0].getBoundingClientRect().width === 0) return;
       setColWidths(ths.map(th => th.getBoundingClientRect().width));
+      // 對齊實際表格容器的左緣與可視寬度（浮動表頭 fixed 定位需與其一致，避免錯位）
+      const wrap = tableWrapRef.current;
+      if (wrap) {
+        const r = wrap.getBoundingClientRect();
+        setStickyBox({ left: r.left, width: r.width });
+      }
     };
     measure();
     window.addEventListener("resize", measure, { passive: true });
@@ -379,8 +447,11 @@ export default function NursePage() {
       // 載入自訂班別 & 週期
       const r = rulesRes.data.rules ?? {};
       if (r.shifts?.work) setWorkShifts(r.shifts.work.map((s: any) => s.code));
+      if (r.shifts?.rest) setRestShifts(r.shifts.rest.map((s: any) => s.code));
       if (r.shifts?.off)  setOffShifts(r.shifts.off.map((s: any) => s.code));
       setLockFirstDay(r.scheduling?.lock_first_day ?? true);
+      setRestrictFirstWeekend(r.scheduling?.restrict_first_weekend ?? true);
+      setMaxPredDays(Number(r.scheduling?.max_off_days ?? 0));
 
       let cycleStart = r.cycle?.start_date ?? "";
       let cycleEnd   = r.cycle?.end_date   ?? "";
@@ -428,9 +499,10 @@ export default function NursePage() {
     } catch (e) { console.error("[loadAll]", e); }
   }
 
-  function showToast(msg: string) {
+  function showToast(msg: string, isErr = msg.startsWith("✗")) {
     if (toastRef.current) clearTimeout(toastRef.current);
     setToast(msg);
+    setToastErr(isErr);
     toastRef.current = setTimeout(() => setToast(""), 2500);
   }
 
@@ -573,28 +645,52 @@ export default function NursePage() {
   async function batchSwipeSave(dates: string[], shift: string | null) {
     setSwipePopup(null);
     setSwipeDates(new Set());
-    for (const d of dates) {
-      const prev = mySchedule[d] ?? null;
-      setAllSched(cur => {
-        const myMap = { ...(cur[user.uid] ?? {}) };
+    // 首個週末硬擋：填 OFF 會導致第一個週六+週日同時 OFF → 不讓填
+    if (shift === "OFF" && firstWeekendBlocked(dates)) {
+      showToast("✗ 不可將週期第一個週六、週日同時預休");
+      setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set());
+      return;
+    }
+    // 預班上限硬擋
+    if (predLimitBlocked(dates, shift)) {
+      showToast(`不可以預班超過${maxPredDays}天喔~~`, true);
+      setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set());
+      return;
+    }
+    // 記錄快照供回滾
+    const prevSnap: Record<string, { shift: string; confirmed: boolean } | undefined> = {};
+    for (const d of dates) prevSnap[d] = mySchedule[d];
+    // 樂觀更新所有格子
+    setAllSched(cur => {
+      const myMap = { ...(cur[user.uid] ?? {}) };
+      for (const d of dates) {
         if (shift) myMap[d] = { shift, confirmed: false };
         else delete myMap[d];
+      }
+      return { ...cur, [user.uid]: myMap };
+    });
+    setSaving(s => { const n = new Set(s); dates.forEach(d => n.add(d)); return n; });
+    try {
+      // 一次 API 呼叫取代 N 次
+      await api.post("/schedule/shifts/batch",
+        dates.map(d => ({ nurse_uid: user.uid, date: d, shift: shift ?? null }))
+      );
+      showToast(shift ? `✓ 已批次填入 ${dates.length} 格` : `✓ 已清除 ${dates.length} 格`);
+    } catch (err: any) {
+      // 回滾
+      setAllSched(cur => {
+        const myMap = { ...(cur[user.uid] ?? {}) };
+        for (const d of dates) {
+          if (prevSnap[d]) myMap[d] = prevSnap[d]!;
+          else delete myMap[d];
+        }
         return { ...cur, [user.uid]: myMap };
       });
-      setSaving(s => new Set(s).add(d));
-      try {
-        await api.post("/schedule/shift", { nurse_uid: user.uid, date: d, shift: shift ?? null });
-      } catch {
-        setAllSched(cur => {
-          const myMap = { ...(cur[user.uid] ?? {}) };
-          if (prev) myMap[d] = prev; else delete myMap[d];
-          return { ...cur, [user.uid]: myMap };
-        });
-      } finally {
-        setSaving(s => { const n = new Set(s); n.delete(d); return n; });
-      }
+      const detail = (err as any).response?.data?.detail ?? "網路錯誤";
+      showToast(`✗ 儲存失敗：${detail}`);
+    } finally {
+      setSaving(s => { const n = new Set(s); dates.forEach(d => n.delete(d)); return n; });
     }
-    showToast(shift ? `✓ 已批次填入 ${dates.length} 格` : `✓ 已清除 ${dates.length} 格`);
   }
 
   function openCell(date: string) {
@@ -609,9 +705,22 @@ export default function NursePage() {
   async function handleSelect(shift: string | null) {
     if (!popup) return;
     const { date } = popup;
+
+    // 首個週末硬擋：填 OFF 會導致第一個週六+週日同時 OFF → 不讓填（彈窗保持開著讓他改選）
+    if (shift === "OFF" && firstWeekendBlocked([date])) {
+      showToast("✗ 不可將週期第一個週六、週日同時預休");
+      return;
+    }
+    // 預班上限硬擋
+    if (predLimitBlocked([date], shift)) {
+      showToast(`不可以預班超過${maxPredDays}天喔~~`, true);
+      return;
+    }
     setPopup(null);
 
     const prev = mySchedule[date] ?? null;
+    const wasConfirmed = prev?.confirmed === true;
+
     // 樂觀更新（標記為未確認）
     setAllSched(cur => {
       const myMap = { ...(cur[user.uid] ?? {}) };
@@ -619,8 +728,17 @@ export default function NursePage() {
       else delete myMap[date];
       return { ...cur, [user.uid]: myMap };
     });
-    setSaving(s => new Set(s).add(date));
 
+    // 若原本是已確認格子，不直接儲存，需透過送出確認
+    if (wasConfirmed) {
+      if (!shift) {
+        // 刪除已確認格子：記錄為待刪除
+        setPendingDeletes(s => new Set(s).add(date));
+      }
+      return;
+    }
+
+    setSaving(s => new Set(s).add(date));
     try {
       await api.post("/schedule/shift", { nurse_uid: user.uid, date, shift: shift ?? null });
       showToast("✓ 已儲存");
@@ -642,19 +760,28 @@ export default function NursePage() {
     const toConfirm = Object.entries(mySchedule)
       .filter(([, v]) => !v.confirmed)
       .map(([date, v]) => ({ nurse_uid: user.uid, date, shift: v.shift }));
-    if (toConfirm.length === 0) return;
+    const deletes = Array.from(pendingDeletes);
+    if (toConfirm.length === 0 && deletes.length === 0) return;
 
     setConfirming(true);
     try {
-      await api.post("/schedule/confirm", toConfirm);
-      setAllSched(cur => {
-        const myMap = { ...(cur[user.uid] ?? {}) };
-        for (const { date } of toConfirm) {
-          if (myMap[date]) myMap[date] = { ...myMap[date], confirmed: true };
-        }
-        return { ...cur, [user.uid]: myMap };
-      });
-      showToast(`✓ 已確認送出 ${toConfirm.length} 格班別`);
+      if (toConfirm.length > 0) {
+        await api.post("/schedule/confirm", toConfirm);
+        setAllSched(cur => {
+          const myMap = { ...(cur[user.uid] ?? {}) };
+          for (const { date } of toConfirm) {
+            if (myMap[date]) myMap[date] = { ...myMap[date], confirmed: true };
+          }
+          return { ...cur, [user.uid]: myMap };
+        });
+      }
+      if (deletes.length > 0) {
+        await Promise.all(deletes.map(date =>
+          api.post("/schedule/shift", { nurse_uid: user.uid, date, shift: null })
+        ));
+        setPendingDeletes(new Set());
+      }
+      showToast(`✓ 已確認送出 ${toConfirm.length + deletes.length} 格班別`);
     } catch (err: any) {
       const detail = err.response?.data?.detail ?? err.message ?? "請稍後再試";
       showToast(`✗ 確認失敗：${detail}`);
@@ -663,9 +790,41 @@ export default function NursePage() {
     }
   }
 
+  async function clearUnconfirmed() {
+    setClearConfirm(false);
+    const dates = Object.entries(mySchedule).filter(([, v]) => !v.confirmed).map(([date]) => date);
+    if (dates.length === 0) return;
+    setClearing(true);
+    // 快照供回滾
+    const prevSnap: Record<string, Entry | undefined> = {};
+    for (const d of dates) prevSnap[d] = mySchedule[d];
+    // 樂觀更新：移除這些未確認格子
+    setAllSched(cur => {
+      const myMap = { ...(cur[user.uid] ?? {}) };
+      for (const d of dates) delete myMap[d];
+      return { ...cur, [user.uid]: myMap };
+    });
+    try {
+      await api.post("/schedule/shifts/batch", dates.map(d => ({ nurse_uid: user.uid, date: d, shift: null })));
+      showToast(`✓ 已清除 ${dates.length} 格未確認預班`);
+    } catch (err: any) {
+      // 回滾
+      setAllSched(cur => {
+        const myMap = { ...(cur[user.uid] ?? {}) };
+        for (const d of dates) { const p = prevSnap[d]; if (p) myMap[d] = p; }
+        return { ...cur, [user.uid]: myMap };
+      });
+      showToast(`✗ 清除失敗：${err.response?.data?.detail ?? err.message ?? "請稍後再試"}`);
+    } finally {
+      setClearing(false);
+    }
+  }
+
   async function saveProfile() {
     try {
       await api.patch(`/users/${user.uid}`, { note, attr });
+      // 儲存成功後即時更新本地 nurses，讓 myAttr（畫面用的屬性）立刻反映，不需重整
+      setNurses(prev => prev.map(n => n.uid === user.uid ? { ...n, attr } : n));
       flashMsg("個人設定已儲存");
     } catch { flashMsg("儲存失敗", false); }
   }
@@ -673,7 +832,7 @@ export default function NursePage() {
   async function changePw() {
     if (!pw0 || !pw1 || !pw2) return flashMsg("請填寫所有密碼欄位", false);
     if (pw1 !== pw2) return flashMsg("兩次新密碼不一致", false);
-    if (pw1.length < 6) return flashMsg("新密碼至少 6 個字元", false);
+    if (pw1.length < 4) return flashMsg("新密碼至少 4 個字元", false);
     try {
       await api.post("/auth/change-password", { old_password: pw0, new_password: pw1 });
       setPw0(""); setPw1(""); setPw2("");
@@ -684,8 +843,8 @@ export default function NursePage() {
   }
 
   function flashMsg(text: string, ok = true) {
-    setSMsg({ text, ok });
-    setTimeout(() => setSMsg({ text: "", ok: true }), 2800);
+    // 個人設定訊息改用與預班相同的底部 toast（成功綠、失敗紅）
+    showToast(ok ? `✓ ${text}` : `✗ ${text}`);
   }
 
   const EyeOn  = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>;
@@ -738,7 +897,7 @@ export default function NursePage() {
           width: 70px; min-width: 70px;
         }
         .th-name { padding: 8px 10px; font-size: 11px; font-weight: 700; color: #6b7280; text-align: left; }
-        .td-name { padding: 7px 10px; font-size: 13px; font-weight: 700; color: #111827; background: #fff; }
+        .td-name { padding: 7px 10px; font-size: 15px; font-weight: 700; color: #111827; background: #fff; }
         .td-name.is-me { color: #1d4ed8; background: #eff6ff; }
 
         /* 班屬欄 */
@@ -755,7 +914,8 @@ export default function NursePage() {
 
         /* 日期欄 */
         .th-day { padding: 6px 2px; text-align: center; font-size: 11px; font-weight: 700; color: #374151; background: #f8fafc; width: 42px; min-width: 42px; line-height: 1.3; }
-        .th-day.we { color: #dc2626; }
+        .th-day.we { color: #dc2626; background: #fef2f2; }
+        .td-shift.we { background: #fef9f9; }
 
         /* 班別格 */
         .td-shift { text-align: center; padding: 3px 2px; }
@@ -815,15 +975,19 @@ export default function NursePage() {
 
         /* Toast */
         .toast {
-          position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
-          background: #111827; color: #fff; padding: 9px 22px;
-          border-radius: 99px; font-size: 13px; font-weight: 600;
+          position: fixed; bottom: 34px; left: 50%; transform: translateX(-50%);
+          background: #15803d; color: #fff; padding: 11px 26px;
+          border-radius: 12px; font-size: 16px; font-weight: 500; letter-spacing: .3px;
           z-index: 10000; pointer-events: none;
-          box-shadow: 0 4px 16px rgba(0,0,0,.2);
+          box-shadow: 0 5px 18px rgba(0,0,0,.2);
           white-space: nowrap;
           animation: fade-up .18s ease;
         }
-        @keyframes fade-up { from { opacity: 0; transform: translateX(-50%) translateY(8px); } }
+        @keyframes fade-up { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
+        /* 桌機放大儲存提示 */
+        @media (min-width: 768px) {
+          .toast { font-size: 18px; font-weight: 600; }
+        }
 
         /* 凡例 */
         .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 8px 16px 10px; font-size: 11px; color: #6b7280; }
@@ -842,7 +1006,7 @@ export default function NursePage() {
           .cell-span { width: 26px !important; height: 24px !important; font-size: 10px !important; }
           .th-day { min-width: 30px !important; width: 30px !important; font-size: 9px !important; padding: 4px 1px !important; }
           .td-shift { padding: 1px !important; }
-          .th-name, .td-name, .td-name-off { font-size: 10px !important; min-width: 50px !important; width: 50px !important; }
+          .th-name, .td-name, .td-name-off { font-size: 12px !important; min-width: 50px !important; width: 50px !important; }
           .th-attr, .td-attr { left: 50px !important; width: 26px !important; min-width: 26px !important; font-size: 9px !important; }
         }
       `}</style>
@@ -855,11 +1019,12 @@ export default function NursePage() {
         </div>
         <div className="np-nav-r">
           {isDual && (
-            <button className="xbtn xbtn-purple" onClick={() => safeLeave(() => nav("/admin"))}>
-              🛡 變身→管理員後台
+            <button className="xbtn xbtn-purple" onClick={() => safeLeave(() => { window.location.href = "/admin"; })}>
+              管理員後台
             </button>
           )}
-          <button className="xbtn xbtn-gray" onClick={() => safeLeave(() => { clearAuth(); nav("/login"); })}>登出</button>
+          <button className="xbtn xbtn-gray" onClick={() => safeLeave(() => { window.location.href = "/home"; })}>回首頁</button>
+          <button className="xbtn xbtn-gray" onClick={() => safeLeave(() => { clearAuth(); window.location.href = "/login"; })}>登出</button>
         </div>
       </nav>
 
@@ -895,7 +1060,7 @@ export default function NursePage() {
               ? <span style={{ color: "#d1d5db", fontWeight: 400 }}>本月尚未填寫預班</span>
               : <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400 }}>
                   已確認 {Object.values(mySchedule).filter(v => v.confirmed).length} 格
-                  ／待確認 {Object.values(mySchedule).filter(v => !v.confirmed).length} 格
+                  ／待確認 {Object.values(mySchedule).filter(v => !v.confirmed).length + pendingDeletes.size} 格
                 </span>
             }
           </div>
@@ -904,7 +1069,8 @@ export default function NursePage() {
           <div className="legend">
             <span className="legend-dot"><span className="legend-box" style={{ background: "#dcfce7", borderColor: "#16a34a" }} />已填入（待確認）</span>
             <span className="legend-dot"><span className="legend-box" style={{ background: "#166534", borderColor: "#14532d" }} />已確認</span>
-            <span className="legend-dot"><span className="legend-box" style={{ background: "#fef9c3", borderColor: "#eab308" }} />屬性不符提示</span>
+            <span className="legend-dot"><span className="legend-box" style={{ background: "#fef9c3", borderColor: "#eab308" }} />屬性不符（待確認）</span>
+            <span className="legend-dot"><span className="legend-box" style={{ background: "#854d0e", borderColor: "#713f12" }} />屬性不符（已確認）</span>
           </div>
 
           {/* 捲動速度選擇器 */}
@@ -949,24 +1115,27 @@ export default function NursePage() {
                       <td className={`td-name${isMe ? " is-me" : ""}`}>
                         {n.name}
                         {n.halftime && <span style={{ fontSize: 9, color: "#16a34a", fontWeight: 700, marginLeft: 3 }}>半</span>}
+                        {n.admin_staff && <span style={{ fontSize: 9, color: "#7c3aed", fontWeight: 700, marginLeft: 3 }}>行政</span>}
                         {isMe ? " ★" : ""}
                       </td>
                       <td className={`td-attr${isMe ? " is-me" : ""}`}>
                         {attrShort(n.attr) || "—"}
                       </td>
                       {days.map(d => {
+                        const _dow      = dayjs(d).day();
+                        const _isWe     = _dow === 0 || _dow === 6;
                         const entry     = nSched[d];
                         const shift     = entry?.shift;
                         const confirmed = entry?.confirmed ?? false;
                         const isSaving  = isMe && saving.has(d);
 
                         // 屬性不符（只對自己判斷）
-                        const mismatch  = isMe ? !!attrMismatchMsg(shift ?? "", myAttr, offShifts) : false;
+                        const mismatch  = isMe ? !!attrMismatchMsg(shift ?? "", myAttr, allOffShifts) : false;
                         const isDay1Locked = lockFirstDay && cycleRange && d === cycleRange.start;
                         // 管理員填入：updated_by 不是本人
                         const isAdminFilled = !!shift && !!entry?.updated_by && entry.updated_by !== n.uid;
 
-                        const { cls, style } = cellStyleFor(shift, confirmed, isSaving, mismatch, offShifts, isAdminFilled);
+                        const { cls, style } = cellStyleFor(shift, confirmed, isSaving, mismatch, allOffShifts, isAdminFilled);
                         const finalCls = `${cls}${!isMe ? " readonly" : ""}`;
 
                         const title = !isMe ? undefined
@@ -983,10 +1152,10 @@ export default function NursePage() {
                         const ctrlShiftCls = (isCtrlSel ? " is-ctrl-sel" : "") + (isShiftSel ? " is-shift-sel" : "");
 
                         return (
-                          <td key={d} className="td-shift">
+                          <td key={d} className={`td-shift${_isWe ? " we" : ""}`}>
                             <span
                               className={finalCls + swipeCls + ctrlShiftCls}
-                              style={style}
+                              style={isMe && !isSuperAdmin && !isDay1Locked ? { ...style, touchAction: "pan-y" } : style}
                               data-date={isMe && !isDay1Locked ? d : undefined}
                               data-ni={isMe && !isDay1Locked ? String(ni) : undefined}
                               onClick={isMe && !isSuperAdmin && !isDay1Locked ? (e) => {
@@ -1054,10 +1223,17 @@ export default function NursePage() {
           <div className="confirm-bar">
             <button
               className="xbtn xbtn-green"
-              disabled={!hasUnconfirmed || confirming}
+              disabled={!hasUnconfirmed || confirming || clearing}
               onClick={confirmMyShifts}
             >
-              {confirming ? "送出中…" : `確認送出（${Object.values(mySchedule).filter(v => !v.confirmed).length} 格待確認）`}
+              {confirming ? "送出中…" : `確認送出（${Object.values(mySchedule).filter(v => !v.confirmed).length + pendingDeletes.size} 格待確認）`}
+            </button>
+            <button
+              className="xbtn xbtn-redsoft"
+              disabled={Object.values(mySchedule).filter(v => !v.confirmed).length === 0 || confirming || clearing}
+              onClick={() => setClearConfirm(true)}
+            >
+              {clearing ? "清除中…" : `清除未確認（${Object.values(mySchedule).filter(v => !v.confirmed).length} 格）`}
             </button>
             {!hasUnconfirmed && Object.keys(mySchedule).length > 0 && (
               <span style={{ fontSize: 13, color: "#16a34a", fontWeight: 600 }}>✓ 本月所有班別已確認</span>
@@ -1072,6 +1248,7 @@ export default function NursePage() {
         {npTab === "settings" && <div className="xcard">
           <div className="sblock">
             <div className="sblock-title">基本資料</div>
+            {!iAmAdminStaff && (
             <div className="xfield">
               <label>輪班屬性</label>
               <select value={attr} onChange={e => setAttr(e.target.value)}
@@ -1085,6 +1262,7 @@ export default function NursePage() {
                 <option value="輪班DEN">輪班DEN</option>
               </select>
             </div>
+            )}
             <div className="xfield">
               <label>備註</label>
               <textarea value={note} onChange={e => setNote(e.target.value)} placeholder="其他備註（選填）" rows={2} style={{ resize: "vertical" }} />
@@ -1105,7 +1283,7 @@ export default function NursePage() {
             </div>
             <div className="xfield">
               <label>新密碼</label>
-              <input type={showPw ? "text" : "password"} value={pw1} onChange={e => setPw1(e.target.value)} placeholder="至少 6 個字元" />
+              <input type={showPw ? "text" : "password"} value={pw1} onChange={e => setPw1(e.target.value)} placeholder="至少 4 個字元" />
             </div>
             <div className="xfield">
               <label>確認新密碼</label>
@@ -1119,7 +1297,6 @@ export default function NursePage() {
               onClick={changePw}
               disabled={!pw0 || !pw1 || !pw2 || pw1 !== pw2}
             >變更密碼</button>
-            {sMsg.text && <div className={sMsg.ok ? "smsg-ok" : "smsg-err"}>{sMsg.text}</div>}
           </div>
         </div>}
 
@@ -1150,6 +1327,16 @@ export default function NursePage() {
                   padding: "5px 14px", borderRadius: 7, fontSize: 13, fontWeight: 600,
                   cursor: "pointer", fontFamily: "inherit", border: "1.5px solid #e5e7eb",
                   background: "#f9fafb", color: "#111827",
+                }}>{s}</button>
+              ))}
+            </div>
+            <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginBottom: 6 }}>應休</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+              {restShifts.map(s => (
+                <button key={s} onClick={() => batchSwipeSave(batchPopup.dates, s).then(() => { setBatchPopup(null); setCtrlSelected(new Set()); setShiftRange(new Set()); })} style={{
+                  padding: "5px 14px", borderRadius: 7, fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit", border: "1.5px solid #fecaca",
+                  background: "#fff5f5", color: "#dc2626",
                 }}>{s}</button>
               ))}
             </div>
@@ -1202,6 +1389,16 @@ export default function NursePage() {
                 }}>{s}</button>
               ))}
             </div>
+            <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginBottom: 6 }}>應休</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+              {restShifts.map(s => (
+                <button key={s} onClick={() => batchSwipeSave(swipePopup.dates, s)} style={{
+                  padding: "5px 14px", borderRadius: 7, fontSize: 13, fontWeight: 600,
+                  cursor: "pointer", fontFamily: "inherit", border: "1.5px solid #fecaca",
+                  background: "#fff5f5", color: "#dc2626",
+                }}>{s}</button>
+              ))}
+            </div>
             <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, marginBottom: 6 }}>放假 / 調整</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
               {offShifts.map(s => (
@@ -1228,16 +1425,29 @@ export default function NursePage() {
           current={mySchedule[popup.date]?.shift ?? ""}
           userAttr={myAttr}
           workShifts={workShifts}
+          restShifts={restShifts}
           offShifts={offShifts}
           onSelect={handleSelect}
           onClose={() => setPopup(null)}
         />
       )}
 
+      {/* ── 清除未確認確認 */}
+      {clearConfirm && (
+        <Dialog
+          title="清除未確認的預班？"
+          body={<>將清除所有<b>尚未確認送出</b>的預班格子（共 {Object.values(mySchedule).filter(v => !v.confirmed).length} 格），已確認的班別不受影響。此動作無法復原。</>}
+          actions={[
+            { label: "取消", onClick: () => setClearConfirm(false) },
+            { label: "確定清除", style: { background: "#dc2626", color: "#fff" }, onClick: clearUnconfirmed },
+          ]}
+        />
+      )}
+
       {/* ── 已確認格子修改確認 */}
       {confirmEdit && (
         <Dialog
-          title="確認修改已送出的班別？"
+          title="你真的要修改已送出的班別？"
           body={<>已確認的班別（{confirmEdit.date}）修改後將回到<b>待確認</b>狀態，需重新送出確認。</>}
           actions={[
             {
@@ -1260,7 +1470,7 @@ export default function NursePage() {
       {/* ── 離開確認 */}
       {leaveDialog && (
         <Dialog
-          title="有未確認的班別"
+          title="欸欸欸~你還沒確認就要離開喔"
           body="您有班別尚未確認送出。離開後管理員將無法看到這些預班。"
           actions={[
             {
@@ -1291,9 +1501,9 @@ export default function NursePage() {
       )}
 
       {/* ── 浮動日期列（向上捲過 navbar 後固定） */}
-      {showStickyHdr && colWidths.length >= 2 && (
+      {showStickyHdr && colWidths.length >= 2 && stickyBox.width > 0 && (
         <div style={{
-          position: "fixed", top: 52, left: 0, right: 0,
+          position: "fixed", top: 52, left: stickyBox.left, width: stickyBox.width,
           zIndex: 98, background: "#f8fafc",
           boxShadow: "0 2px 6px rgba(0,0,0,.10)",
           overflow: "hidden",
@@ -1337,7 +1547,7 @@ export default function NursePage() {
       )}
 
       {/* ── Toast */}
-      {toast && <div className="toast">{toast}</div>}
+      {toast && <div className="toast" style={toastErr ? { background: "#dc2626" } : undefined}>{toast}</div>}
     </>
   );
 }

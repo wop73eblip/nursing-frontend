@@ -7,6 +7,9 @@ const BASE = import.meta.env.VITE_API_URL
     ? "http://localhost:8000"
     : `http://${window.location.hostname}:8000`);
 
+// 讓同網域的靜態小遊戲（/game/）也能知道後端網址去存檔
+try { localStorage.setItem("apiBase", BASE); } catch {}
+
 const api = axios.create({ baseURL: BASE });
 
 api.interceptors.request.use((config) => {

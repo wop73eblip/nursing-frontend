@@ -27,7 +27,7 @@ const DEFAULT_OFF: ShiftDef[] = [
 const ROLE_ABBR:   Record<string,string> = { nurse:"護", dual:"兼", admin:"管", superadmin:"超" };
 
 // ─── Types
-type Tab = "schedule"|"users"|"cycle"|"rules"|"shifts_cfg"|"generate"|"logs"|"home_modules";
+type Tab = "schedule"|"users"|"cycle"|"rules"|"rules_overview"|"shifts_cfg"|"generate"|"logs"|"home_modules";
 
 interface ShiftDef { code: string; label: string; type: "work"|"rest"|"off"; admin_only?: boolean; }
 interface User {
@@ -1427,6 +1427,7 @@ export default function AdminPage() {
     { key:"schedule",   label:"手動填寫" },
     { key:"cycle",      label:"排班週期" },
     { key:"rules",      label:"排班規則" },
+    { key:"rules_overview", label:"規則總覽" },
     { key:"generate",   label:"一鍵生成" },
     { key:"users",      label:"帳號管理" },
     { key:"shifts_cfg", label:"班別設定" },
@@ -2796,45 +2797,163 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* 排班規則總覽說明卡 */}
-            <div className="card">
-              <div className="card-head"><div style={{ fontSize:15, fontWeight:700 }}>📋 排班規則總覽</div></div>
-              <div className="card-body">
-                <div style={{ display:"flex", flexDirection:"column", gap:6, fontSize:13, color:"#374151", lineHeight:1.8 }}>
-                  <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginBottom:2 }}>── 硬規則（一定遵守）──</div>
-                  <div>• 每班每日恰好符合設定人數（硬性）；若因預填/已確認資料湊不齊，會生成失敗並提示原因</div>
-                  <div>• 已填班別（含未確認）一律保留，不得覆蓋，只填寫空白格子</div>
-                  <div>• 反向班禁止：E→D 需隔 1 天休；N→E 需隔 1 天休；N→D 需隔 2 天休</div>
-                  <div>• 每週 D/E/N 至多兩種班別（絕對硬性）。若預填出現班屬外班別（如輪班DE填N），該週自動改為「例外班種＋一種原班別」（如 N+D 或 N+E），其餘週維持原班屬</div>
-                  <div>• 每週至少 1 天休假（硬性）</div>
-                  <div>• 一例一休（每週至少 2 天休）：硬性（勾選時）；若人力或預班湊不出，會生成失敗並提示原因。不勾則完全不強制</div>
-                  <div>• 每班每日至少 1 位 leader（硬性）</div>
-                  <div>• 每班每日至少 2 位 leader/second（硬性，受當班需求人數上限）</div>
-                  <div>• 連續上班天數不超過設定值，跨週累計</div>
-                  <div>• 輪班屬性限制（輪班DE只排D/E等）；固定班偏離由「允許固定班偏離」規則控制（勾＝最多偏離 2 格、未勾＝完全不可偏離）。<b>公平優先版：固定班 0 偏離、絕對只排該班</b></div>
-                  <div>• 放假 / 調整類（特休 V、員旅、喪假、延休、補休、調移）：最高優先鎖定，不佔應休名額</div>
-                  <div>• 半職（半）視同應休，計入應休天數</div>
-                  <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginTop:6, marginBottom:2 }}>── 應休天數 ──</div>
-                  <div>• 全職應休 = 8 + 國定假日（最多 13 天）；半職應休 = 28 − (160 − 國定假日×8)÷2÷8（可上天數小數點無條件捨去）</div>
-                  <div>• 應休下限為軟約束：人力不足時最多縮減 2 天；超休每天懲罰 500</div>
-                  <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginTop:6, marginBottom:2 }}>── 休假規則 ──</div>
-                  <div>• 指定休不可覆蓋：管理員標記的 OFF 不被生成取代</div>
-                  <div>• 第一天鎖定：週期第一天已有記錄時鎖定，不被生成覆蓋</div>
-                  <div>• 首個週末（護理師預班限制）：全職護理師預班時不可將週期第一個週六、週日同時填 OFF（只算 OFF、半職不受限）；自動排班不受此限</div>
-                  <div>• 自動休連續上限 N 天：系統排的休假不超過 N 天連休（指定休可中斷計算）（半職不受此限）</div>
-                  <div>• 連續 OFF 總上限：指定休 + 自動休合計連休不得超過設定值（放假/調整類自動中斷；預填已超過時自動讓路）（半職不受此限）</div>
-                  <div style={{ fontWeight:700, color:"#6b7280", fontSize:12, marginTop:6, marginBottom:2 }}>── 軟規則（人力允許時盡量遵守）──</div>
-                  <div>• 順班：只罰「多餘換班」＋「沒休就換」（輪班本來就必須換的「必要換班」不罰）</div>
-                  <div style={{ paddingLeft:12, color:"#6b7280", fontSize:12 }}>必要換班數＝班種數−1（固定班0、2種班1、DEN2）。多餘換班每次 +1500；沒休直接換每次另加 +500。→ 必要+有休=0；必要+沒休=500；多餘+有休=1500；多餘+沒休=2000</div>
-                  <div>• 避免孤立上班日：OFF-上班-OFF（只出來上一天班）懲罰 +750</div>
-                  <div>• 固定班（固定 D / E / N）：偏離固定班種每格懲罰 +500，且硬性最多 2 格偏離</div>
-                  <div>• 各護理師班次數接近設定比例（±1 天彈性，超出每單位懲罰 +900）</div>
-                  <div>• 應休天數縮減公平性：各護理師縮減幅度差距（懲罰 400）</div>
-                </div>
-              </div>
-            </div>
           </div>
         )}
+
+        {/* ══════════════════════════════════
+            Tab: 規則總覽（唯讀說明）
+        ══════════════════════════════════ */}
+        {tab === "rules_overview" && (() => {
+          type Row = { no: string; title: string; desc?: string };
+          const HARD: Row[] = [
+            { no:"H1",  title:"每班每日恰好符合設定人數", desc:"若因預填/已確認資料湊不齊，生成失敗並提示原因" },
+            { no:"H2",  title:"已填班別一律保留", desc:"含未確認的預填，不覆蓋、只填空白格" },
+            { no:"H3",  title:"反向班禁止", desc:"E→D 隔 1 天休；N→E 隔 1 天休；N→D 隔 2 天休" },
+            { no:"H4",  title:"每週 D/E/N 至多兩種班別", desc:"預填出現班屬外班別時，該週自動改為「例外+一種原班」" },
+            { no:"H5",  title:"每週至少 1 天休" },
+            { no:"H6",  title:"一例一休（每週至少 2 天休）", desc:"勾選時硬性；若人力/預班湊不出會失敗。不勾則不強制" },
+            { no:"H7",  title:"每班每日至少 1 位 leader" },
+            { no:"H8",  title:"每班每日至少 2 位 leader/second", desc:"受當班需求人數上限" },
+            { no:"H9",  title:"連續上班天數不超過設定值", desc:"跨週累計" },
+            { no:"H10", title:"輪班屬性限制 + 固定班偏離", desc:"輪班DE只排D/E等；勾「允許固定班偏離」＝最多 2 格，未勾＝0 格。公平優先版一律 0 格" },
+            { no:"H11", title:"放假/調整類最高優先鎖定", desc:"特休V/員旅/喪假/延休/補休/調移，不佔應休名額" },
+            { no:"H12", title:"半職視同應休", desc:"計入應休天數" },
+          ];
+          const QUOTA: Row[] = [
+            { no:"R1", title:"應休天數公式", desc:"全職 = 8 + 國定假日（最多 13）；半職 = 28 − (160 − 國定×8)÷2÷8（小數捨去）" },
+            { no:"R2", title:"應休下限為軟約束", desc:"人力不足時最多縮減 2 天；超休每天罰 +500" },
+          ];
+          const LEAVE: Row[] = [
+            { no:"L1", title:"指定休不可覆蓋", desc:"管理員標記的 OFF 不被生成取代" },
+            { no:"L2", title:"第一天鎖定", desc:"週期第一天已有記錄時不被覆蓋" },
+            { no:"L3", title:"首個週末預班限制", desc:"僅護理師預班階段：全職不可將週期第一個週六、週日同時填 OFF（半職不受限）；自動排班不受此限" },
+            { no:"L4", title:"自動休連續上限 N 天", desc:"系統排的休假不超過 N 天連休（指定休可中斷；半職不受限）" },
+            { no:"L5", title:"連續 OFF 總上限", desc:"指定休+自動休合計連休不得超過設定值（放假/調整類自動中斷；半職不受限）" },
+          ];
+          const SOFT: (Row & { penalty?: string })[] = [
+            { no:"S1", title:"順班", desc:"只罰「多餘換班」+「沒休就換」；輪班必要換班不罰（見下表）", penalty:"1500 / 500" },
+            { no:"S2", title:"避免孤立上班日", desc:"OFF-上班-OFF（只出來上一天班）", penalty:"+750" },
+            { no:"S3", title:"固定班偏離", desc:"偏離固定班種每格；並硬性最多 2 格", penalty:"+500 / 格" },
+            { no:"S4", title:"班次比例偏差", desc:"各護理師班次數接近設定比例（±1 天彈性）", penalty:"+900 / 單位" },
+            { no:"S5", title:"應休縮減公平性", desc:"各護理師縮減幅度差距", penalty:"+400" },
+          ];
+
+          const COLORS = {
+            hard:  { bar:"#dc2626", badge:"#fee2e2", badgeText:"#b91c1c", head:"#7f1d1d" },
+            quota: { bar:"#2563eb", badge:"#dbeafe", badgeText:"#1d4ed8", head:"#1e3a8a" },
+            leave: { bar:"#059669", badge:"#d1fae5", badgeText:"#047857", head:"#064e3b" },
+            soft:  { bar:"#d97706", badge:"#fef3c7", badgeText:"#b45309", head:"#78350f" },
+          };
+
+          const ruleRow = (r: Row & { penalty?: string }, kind: keyof typeof COLORS, isLast: boolean) => (
+            <div key={r.no} style={{
+              display:"flex", gap:14, alignItems:"flex-start",
+              padding:"12px 4px",
+              borderBottom: isLast ? "none" : "1px dashed #f3f4f6",
+            }}>
+              <div style={{
+                flex:"0 0 44px", height:26,
+                background: COLORS[kind].badge, color: COLORS[kind].badgeText,
+                fontWeight:800, fontSize:12, letterSpacing:0.3,
+                display:"flex", alignItems:"center", justifyContent:"center",
+                borderRadius:6,
+              }}>{r.no}</div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:14.5, fontWeight:700, color:"#111827", lineHeight:1.4 }}>
+                  {r.title}
+                </div>
+                {r.desc && (
+                  <div style={{ fontSize:12.5, color:"#6b7280", marginTop:4, lineHeight:1.7 }}>
+                    {r.desc}
+                  </div>
+                )}
+              </div>
+              {"penalty" in r && r.penalty && (
+                <div style={{
+                  flex:"0 0 auto",
+                  fontSize:11.5, color: COLORS.soft.badgeText,
+                  background: COLORS.soft.badge, padding:"3px 8px",
+                  borderRadius:999, fontWeight:700, whiteSpace:"nowrap",
+                }}>{r.penalty}</div>
+              )}
+            </div>
+          );
+
+          const sectionCard = (
+            kind: keyof typeof COLORS,
+            title: string, subtitle: string,
+            rows: (Row & { penalty?: string })[],
+            extra?: React.ReactNode,
+          ) => (
+            <div style={{
+              background:"#fff", borderRadius:12, overflow:"hidden",
+              borderLeft: `4px solid ${COLORS[kind].bar}`,
+              boxShadow:"0 1px 3px rgba(0,0,0,0.04)",
+              border:"1px solid #e5e7eb", borderLeftWidth:4,
+            }}>
+              <div style={{
+                padding:"14px 18px", borderBottom:"1px solid #f3f4f6",
+                display:"flex", alignItems:"baseline", gap:10, flexWrap:"wrap",
+              }}>
+                <div style={{ fontSize:16, fontWeight:800, color: COLORS[kind].head }}>{title}</div>
+                <div style={{ fontSize:12.5, color:"#9ca3af" }}>{subtitle}</div>
+                <div style={{ marginLeft:"auto", fontSize:11.5, color:"#9ca3af" }}>共 {rows.length} 條</div>
+              </div>
+              <div style={{ padding:"4px 18px 12px" }}>
+                {rows.map((r, i) => ruleRow(r, kind, i === rows.length - 1))}
+              </div>
+              {extra}
+            </div>
+          );
+
+          const switchTable = (
+            <div style={{
+              margin:"0 18px 16px", padding:"12px 14px",
+              background:"#fffbeb", border:"1px solid #fde68a", borderRadius:8,
+            }}>
+              <div style={{ fontSize:12.5, fontWeight:700, color:"#78350f", marginBottom:8 }}>
+                S1 順班懲罰對照表（每次）
+              </div>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+                  <thead>
+                    <tr style={{ background:"#fef3c7" }}>
+                      <th style={{ padding:"6px 10px", textAlign:"left", color:"#78350f", fontWeight:700 }}>情境</th>
+                      <th style={{ padding:"6px 10px", textAlign:"right", color:"#78350f", fontWeight:700, width:110 }}>懲罰值</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr><td style={{ padding:"6px 10px", color:"#374151" }}>必要換班 + 有休</td><td style={{ padding:"6px 10px", textAlign:"right", color:"#059669", fontWeight:700 }}>0</td></tr>
+                    <tr><td style={{ padding:"6px 10px", color:"#374151", borderTop:"1px solid #fde68a" }}>必要換班 + 沒休</td><td style={{ padding:"6px 10px", textAlign:"right", color:"#b45309", fontWeight:700, borderTop:"1px solid #fde68a" }}>+500</td></tr>
+                    <tr><td style={{ padding:"6px 10px", color:"#374151", borderTop:"1px solid #fde68a" }}>多餘換班 + 有休</td><td style={{ padding:"6px 10px", textAlign:"right", color:"#b45309", fontWeight:700, borderTop:"1px solid #fde68a" }}>+1500</td></tr>
+                    <tr><td style={{ padding:"6px 10px", color:"#374151", borderTop:"1px solid #fde68a" }}>多餘換班 + 沒休</td><td style={{ padding:"6px 10px", textAlign:"right", color:"#dc2626", fontWeight:700, borderTop:"1px solid #fde68a" }}>+2000</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ fontSize:11.5, color:"#78350f", marginTop:8, lineHeight:1.7 }}>
+                必要換班數 = 班種數 − 1（固定班 0、2 種班 1、DEN 3 種 2 次）。輪班本來就必須換的次數不罰。
+              </div>
+            </div>
+          );
+
+          return (
+            <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth:880 }}>
+              <div style={{
+                padding:"12px 16px", background:"#eef2ff",
+                border:"1px solid #c7d2fe", borderRadius:10,
+                fontSize:13, color:"#3730a3", lineHeight:1.7,
+              }}>
+                本頁為排班演算法的<b>唯讀規則說明</b>，方便查閱。
+                想調整「一例一休/固定班偏離/連續上班上限」等，請至上方「<b>排班規則</b>」分頁。
+              </div>
+
+              {sectionCard("hard",  "硬規則",   "違反即生成失敗（會提示衝突原因）", HARD)}
+              {sectionCard("quota", "應休天數", "計算公式與縮減上限", QUOTA)}
+              {sectionCard("leave", "休假規則", "OFF 鎖定與連休上限", LEAVE)}
+              {sectionCard("soft",  "軟規則",   "人力允許時盡量遵守；每項有懲罰值", SOFT, switchTable)}
+            </div>
+          );
+        })()}
 
         {/* ══════════════════════════════════
             Tab: 班別設定

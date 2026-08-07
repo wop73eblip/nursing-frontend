@@ -472,6 +472,8 @@ export default function AdminPage() {
     error?: string;
   };
   const [genVersions, setGenVersions] = useState<Partial<Record<GenProfileKey, GenVersion>>>({});
+  // 暖啟動：記憶上次成功生成的三版結果，下次生成時作為 solver hint（各 profile 各自傳自己上次的解）
+  const [lastGenSchedules, setLastGenSchedules] = useState<Partial<Record<GenProfileKey, Record<string, Record<string, string>>>>>({});
   const [selectedProfile, setSelectedProfile] = useState<GenProfileKey | null>(null);
   const [warnOpen, setWarnOpen] = useState<Record<string, boolean>>({});   // 版本卡「警告」展開狀態
   const [committing, setCommitting] = useState(false);
@@ -3173,8 +3175,11 @@ export default function AdminPage() {
             const results: Partial<Record<GenProfileKey, GenVersion>> = {};
             for (const p of GEN_PROFILES) {
               try {
+                const hint = lastGenSchedules[p.key];   // 暖啟動：本 profile 上次的解
+                const body = hint ? { hint_schedules: hint } : {};
                 const { data } = await api.post(
-                  `/schedule/generate?overwrite_confirmed=false&profile=${p.key}`
+                  `/schedule/generate?overwrite_confirmed=false&profile=${p.key}`,
+                  body,
                 );
                 results[p.key] = {
                   schedules: data.schedules,
@@ -3196,6 +3201,15 @@ export default function AdminPage() {
               setGenVersions({ ...results });
             }
             setGenerating(false);
+            // 更新暖啟動記憶（只記成功的版本；失敗的保留舊值以免下次拿不到 hint）
+            const nextHints = { ...lastGenSchedules };
+            for (const p of GEN_PROFILES) {
+              const v = results[p.key];
+              if (v && !v.error && v.schedules && Object.keys(v.schedules).length) {
+                nextHints[p.key] = v.schedules;
+              }
+            }
+            setLastGenSchedules(nextHints);
             const okCount = Object.values(results).filter(v => v && !v.error).length;
             setGenResult(okCount === 0 ? "✗ 三個版本皆生成失敗" : `✓ 已生成 ${okCount}／3 個版本，請比較後選擇一版匯入`);
           }
@@ -3212,6 +3226,7 @@ export default function AdminPage() {
               setCommitResult(data.message ?? "匯入完成");
               setHasGenerated(true);
               setGenVersions({}); setSelectedProfile(null);
+              setLastGenSchedules({});   // 匯入後暖啟動記憶失效（所有 cell 已鎖定，不再需要 hint）
               fetchSchedule();
             } catch (err: any) {
               setCommitResult("✗ " + (err.response?.data?.detail ?? err.message ?? "匯入失敗"));

@@ -2565,19 +2565,6 @@ export default function AdminPage() {
                   </div>
 
                   <div className="setting-section">
-                    <div className="setting-title">⚖ 班型規則說明</div>
-                    <div style={{ fontSize:13, lineHeight:2, color:"#374151" }}>
-                      <div style={{ display:"flex", alignItems:"flex-start", gap:8 }}>
-                        <span style={{ marginTop:1, color:"#16a34a", fontWeight:800, flexShrink:0 }}>✓</span>
-                        <div>
-                          <b>反向班禁止（硬規則 · 固定啟用）</b><br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>禁止 N→D、N→E、E→D 反向排列。大夜後不能排白班或小夜，小夜後不能排白班。此為一定達成的硬規則，不可關閉。</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="setting-section">
                     <div className="setting-title">🌴 休假規則</div>
                     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
 
@@ -2805,37 +2792,71 @@ export default function AdminPage() {
         ══════════════════════════════════ */}
         {tab === "rules_overview" && (() => {
           type Row = { no: string; title: string; desc?: string };
+          // H11 動態抓取「班別設定 → 放假/調整類」目前設定的代碼
+          const _offCodes = offShifts.map(s => s.code).filter(Boolean);
+          const H11_DESC = _offCodes.length
+            ? `目前包含：${_offCodes.join("、")}（來自「班別設定 → 放假/調整類」，自動同步）。最高優先鎖定，不佔應休名額`
+            : "尚未設定放假/調整類班別（請至「班別設定」新增）";
+          // H14 行政班也從「上班類」自動抓（admin_only 或非 D/E/N 的 code）
+          const _adminCodes = workShifts.filter(s => s.code && (s.admin_only || !["D","E","N"].includes(s.code))).map(s => s.code);
+          const H14_DESC = _adminCodes.length
+            ? `目前包含：${_adminCodes.join("、")}（來自「班別設定 → 上班類」的 admin_only 或非 D/E/N 代碼）。視同 D 套用所有 D 規則（反向班、連上等），但不佔臨床人數、leader 名額`
+            : "尚未設定行政類上班班別";
           const HARD: Row[] = [
-            { no:"H1",  title:"每班每日恰好符合設定人數", desc:"若因預填/已確認資料湊不齊，生成失敗並提示原因" },
+            { no:"H1",  title:"每班每日恰好符合設定人數", desc:"預設 D/E/N 各 3 人（可覆蓋，見特殊日期）；行政班、新人不計入。湊不齊會生成失敗" },
             { no:"H2",  title:"已填班別一律保留", desc:"含未確認的預填，不覆蓋、只填空白格" },
-            { no:"H3",  title:"反向班禁止", desc:"E→D 隔 1 天休；N→E 隔 1 天休；N→D 隔 2 天休" },
+            { no:"H3",  title:"反向班禁止", desc:"E→D 隔 1 天休；N→E 隔 1 天休；N→D 隔 2 天休。固定啟用、不可關閉" },
             { no:"H4",  title:"每週 D/E/N 至多兩種班別", desc:"預填出現班屬外班別時，該週自動改為「例外+一種原班」" },
-            { no:"H5",  title:"每週至少 1 天休" },
-            { no:"H6",  title:"一例一休（每週至少 2 天休）", desc:"勾選時硬性；若人力/預班湊不出會失敗。不勾則不強制" },
-            { no:"H7",  title:"每班每日至少 1 位 leader" },
-            { no:"H8",  title:"每班每日至少 2 位 leader/second", desc:"受當班需求人數上限" },
-            { no:"H9",  title:"連續上班天數不超過設定值", desc:"跨週累計" },
-            { no:"H10", title:"輪班屬性限制 + 固定班偏離", desc:"輪班DE只排D/E等；勾「允許固定班偏離」＝最多 2 格，未勾＝0 格。公平優先版一律 0 格" },
-            { no:"H11", title:"放假/調整類最高優先鎖定", desc:"特休V/員旅/喪假/延休/補休/調移，不佔應休名額" },
+            { no:"H5",  title:"每週至少 1 天休", desc:"底線，恆常生效（OFF 或半）" },
+            { no:"H6",  title:"一例一休（每週至少 2 天休）", desc:"勾選時硬性；湊不出會失敗。不勾則不強制下限，但 H5 仍在" },
+            { no:"H7",  title:"每班每日至少 1 位 leader", desc:"行政班、新人的 leader 不算" },
+            { no:"H8",  title:"每班每日至少 2 位 leader/second", desc:"受當班需求人數上限 min(2, 需求)；行政班、新人不算" },
+            { no:"H9",  title:"連續上班天數不超過設定值", desc:"預設 5 天，跨週累計（含上週歷史）" },
+            { no:"H10", title:"輪班屬性限制 + 固定班偏離", desc:"輪班DE 只排 D/E 等；勾「允許固定班偏離」＝最多 2 格，未勾＝0 格。公平優先版一律 0 格" },
+            { no:"H11", title:"放假/調整類最高優先鎖定", desc:H11_DESC },
             { no:"H12", title:"半職視同應休", desc:"計入應休天數" },
+            { no:"H13", title:"班次比例硬上限 ±2 天", desc:"各班種天數偏離理想比例最多 ±2 天（例 10:10 極限 8:12，不會 7:13）。全職半職皆同" },
+            { no:"H14", title:"行政類上班：視同 D、不計人力", desc:H14_DESC },
+            { no:"H15", title:"新人不計臨床人力", desc:"新人=在學習的正式員工：照所有規則排、但 H1/H7/H8 排除。跟隨導師見 S6" },
           ];
           const QUOTA: Row[] = [
-            { no:"R1", title:"應休天數公式", desc:"全職 = 8 + 國定假日（最多 13）；半職 = 28 − (160 − 國定×8)÷2÷8（小數捨去）" },
-            { no:"R2", title:"應休下限為軟約束", desc:"人力不足時最多縮減 2 天；超休每天罰 +500" },
+            { no:"R1", title:"應休天數公式", desc:"全職 = 8 + 國定假日（最多 13）；半職 = 28 − ⌊(160 − 國定×8)÷2÷8⌋（可上天數捨去）" },
+            { no:"R2", title:"應休下限為軟約束", desc:"人力不足時最多縮減 2 天（每天扣 200，縮減不公另扣 400）；超休每天扣 500" },
           ];
           const LEAVE: Row[] = [
             { no:"L1", title:"指定休不可覆蓋", desc:"管理員標記的 OFF 不被生成取代" },
             { no:"L2", title:"第一天鎖定", desc:"週期第一天已有記錄時不被覆蓋" },
-            { no:"L3", title:"首個週末預班限制", desc:"僅護理師預班階段：全職不可將週期第一個週六、週日同時填 OFF（半職不受限）；自動排班不受此限" },
-            { no:"L4", title:"自動休連續上限 N 天", desc:"系統排的休假不超過 N 天連休（指定休可中斷；半職不受限）" },
-            { no:"L5", title:"連續 OFF 總上限", desc:"指定休+自動休合計連休不得超過設定值（放假/調整類自動中斷；半職不受限）" },
+            { no:"L3", title:"自動休連續上限 N 天", desc:"系統排的休假不超過 N 天連休（指定休可切斷、放假/調整類也自動中斷；半職不受限）" },
+            { no:"L4", title:"連續 OFF 總上限", desc:"指定休+自動休合計連休不得超過設定值（放假/調整類自動中斷；半職不受限）" },
           ];
           const SOFT: (Row & { penalty?: string })[] = [
             { no:"S1", title:"順班", desc:"只罰「多餘換班」+「沒休就換」；輪班必要換班不罰（見下表）", penalty:"1500 / 500" },
             { no:"S2", title:"避免孤立上班日", desc:"OFF-上班-OFF（只出來上一天班）", penalty:"+750" },
-            { no:"S3", title:"固定班偏離", desc:"偏離固定班種每格；並硬性最多 2 格", penalty:"+500 / 格" },
-            { no:"S4", title:"班次比例偏差", desc:"各護理師班次數接近設定比例（±1 天彈性）", penalty:"+900 / 單位" },
-            { no:"S5", title:"應休縮減公平性", desc:"各護理師縮減幅度差距", penalty:"+400" },
+            { no:"S3", title:"固定班偏離", desc:"偏離固定班種每格；並硬性最多 2 格（H10）", penalty:"+500 / 格" },
+            { no:"S4", title:"班次比例偏差", desc:"各護理師班次數接近設定比例（±1 天彈性，硬上限 ±2 見 H13）", penalty:"+900 / 單位" },
+            { no:"S5", title:"應休縮減公平性", desc:"各護理師縮減幅度差距（配合 R2）", penalty:"+400" },
+            { no:"S6", title:"新人跟隨導師", desc:"新人每天與導師不同班每格扣分；懲罰值高於 S1/S4，確保跟得住。遇新人自己請假可彈性偏離", penalty:"+3000 / 天" },
+            { no:"S7", title:"每週標準休超額（凸性）", desc:"全職每週 OFF 超過 2 天就扣分（配合 H6 逼收斂為剛好 2）。3 層門檻遞增，逼多餘休假平均攤開。半職不套用", penalty:"+500 × 3 層" },
+          ];
+          // 前端硬擋：不進 CP-SAT，在護理師預班階段就擋住
+          const FRONT: Row[] = [
+            { no:"F1", title:"首個週末不同時休", desc:"全職預班時，週期第一個週六 + 週日不可同時填 OFF（只算 OFF、半職不受限）。自動排班不受此限" },
+            { no:"F2", title:"預班上限", desc:"全職預班的 D/E/N/OFF 總數不得超過設定上限（半、特休等放假/調整類不計；半職不受限）" },
+          ];
+          // 可設定參數（後台「排班規則」分頁可調）
+          const CFG_CHIPS: { k: string; v: string }[] = [
+            { k:"各班每日人數",         v:"D／E／N 每日需求（預設 3／3／3）" },
+            { k:"特殊日期人數覆蓋",     v:"某天可覆蓋不同 D/E/N（如國定假）" },
+            { k:"連續上班上限",         v:"預設 5 天，跨週累計（H9）" },
+            { k:"一例一休",             v:"每週 ≥2 天休（H6）" },
+            { k:"允許固定班偏離",       v:"勾＝最多 2 格、未勾＝0（H10）" },
+            { k:"每人休假上限",         v:"預班可填的總天數上限（F2）" },
+            { k:"自動休每週上限",       v:"系統排的連休天數（L3）" },
+            { k:"含指定休每週上限",     v:"指定休 + 自動休合計（L4）" },
+            { k:"第一天鎖定",           v:"週期首日既有記錄不被覆蓋（L2）" },
+            { k:"指定休不可覆蓋",       v:"管理員標的 OFF 不被取代（L1）" },
+            { k:"首個週末不同時休",     v:"前端預班硬擋（F1）" },
+            { k:"輪班比例",             v:"各屬性 D/E/N 比例，可個別覆蓋（S4）" },
           ];
 
           const COLORS = {
@@ -2843,6 +2864,8 @@ export default function AdminPage() {
             quota: { bar:"#2563eb", badge:"#dbeafe", badgeText:"#1d4ed8", head:"#1e3a8a" },
             leave: { bar:"#059669", badge:"#d1fae5", badgeText:"#047857", head:"#064e3b" },
             soft:  { bar:"#d97706", badge:"#fef3c7", badgeText:"#b45309", head:"#78350f" },
+            front: { bar:"#7c3aed", badge:"#ede9fe", badgeText:"#6d28d9", head:"#4c1d95" },
+            cfg:   { bar:"#64748b", badge:"#f1f5f9", badgeText:"#475569", head:"#334155" },
           };
 
           const ruleRow = (r: Row & { penalty?: string }, kind: keyof typeof COLORS, isLast: boolean) => (
@@ -2951,6 +2974,39 @@ export default function AdminPage() {
               {sectionCard("quota", "應休天數", "計算公式與縮減上限", QUOTA)}
               {sectionCard("leave", "休假規則", "OFF 鎖定與連休上限", LEAVE)}
               {sectionCard("soft",  "軟規則",   "人力允許時盡量遵守；每項有懲罰值", SOFT, switchTable)}
+              {sectionCard("front", "前端硬擋", "護理師預班階段擋住，不進 CP-SAT；自動排班不受此限", FRONT)}
+
+              {/* 可設定參數區（chip 樣式） */}
+              <div style={{
+                background:"#fff", borderRadius:12, overflow:"hidden",
+                borderLeft: `4px solid ${COLORS.cfg.bar}`,
+                boxShadow:"0 1px 3px rgba(0,0,0,0.04)",
+                border:"1px solid #e5e7eb", borderLeftWidth:4,
+              }}>
+                <div style={{
+                  padding:"14px 18px", borderBottom:"1px solid #f3f4f6",
+                  display:"flex", alignItems:"baseline", gap:10, flexWrap:"wrap",
+                }}>
+                  <div style={{ fontSize:16, fontWeight:800, color: COLORS.cfg.head }}>可設定參數</div>
+                  <div style={{ fontSize:12.5, color:"#9ca3af" }}>後台「排班規則」分頁可調整</div>
+                  <div style={{ marginLeft:"auto", fontSize:11.5, color:"#9ca3af" }}>共 {CFG_CHIPS.length} 項</div>
+                </div>
+                <div style={{
+                  padding:14, display:"grid",
+                  gridTemplateColumns:"repeat(auto-fill, minmax(220px, 1fr))",
+                  gap:10,
+                }}>
+                  {CFG_CHIPS.map(c => (
+                    <div key={c.k} style={{
+                      background: COLORS.cfg.badge, border:"1px solid #e2e8f0",
+                      borderRadius:10, padding:"10px 12px",
+                    }}>
+                      <div style={{ fontSize:13.5, fontWeight:700, color:"#111827" }}>{c.k}</div>
+                      <div style={{ fontSize:12, color:"#64748b", marginTop:3, lineHeight:1.6 }}>{c.v}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           );
         })()}

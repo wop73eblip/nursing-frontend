@@ -1473,19 +1473,16 @@ export default function AdminPage() {
         .finput-sm { padding: 6px 9px; font-size: 13px; }
         select.finput { cursor: pointer; }
         /* 日期/時間欄位：恢復原生選擇器圖示（時鐘/日曆），可點選 */
-        /* iOS 專屬修法：min-width:0 讓 flex/grid 能壓過 native min-content；顯式 height 讓 date/time 高度一致 */
+        /* 高度固定 40px 讓 date/time 兩者一致（iOS date 原本會比較高）；padding 0 讓 iOS 內容置中 */
         input[type="date"].finput, input[type="time"].finput {
           -webkit-appearance: auto; appearance: auto;
           min-width: 0; width: 100%;
-          height: 40px; line-height: 20px;
-          padding-top: 0; padding-bottom: 0;
-          display: block;
+          height: 40px;
+          padding: 0 12px;
+          box-sizing: border-box;
         }
         input[type="date"].finput::-webkit-calendar-picker-indicator,
         input[type="time"].finput::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; }
-        /* 移除 iOS 對 date/time 的 auto text-align，讓內容置中一致 */
-        input[type="date"].finput::-webkit-date-and-time-value,
-        input[type="time"].finput::-webkit-date-and-time-value { text-align: left; }
         .fcheck { display: flex; align-items: center; gap: 8px; }
         .fcheck input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #2563eb; }
 
@@ -1626,11 +1623,20 @@ export default function AdminPage() {
         .setting-section { background: #f8fafc; border-radius: 10px; padding: 16px 18px; border: 1px solid #e5e7eb; }
         .setting-title { font-size: 13px; font-weight: 700; color: #374151; margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
 
+        /* 手機專屬：桌面才顯示的贅字 */
+        .ap-desktop-only { display: inline; }
+        /* 手動填寫班表週期標題基本尺寸（桌面顯示大） */
+        .ap-cycle-title { font-size: 18px; }
+
         @media (max-width: 640px) {
           .frow  { grid-template-columns: minmax(0, 1fr); }
           .frow3 { grid-template-columns: minmax(0, 1fr); }
           .ap-body { padding: 12px 10px 80px; }
           .card-body { padding: 14px; }
+          /* 手動填寫班表：週期標題縮字避免換行；桌面才顯示的字隱藏；按鈕縮 padding 塞同一行 */
+          .ap-cycle-title { font-size: 14px; }
+          .ap-desktop-only { display: none; }
+          .card-head .btn { padding: 8px 10px; font-size: 12px; }
         }
       `}</style>
 
@@ -1672,15 +1678,22 @@ export default function AdminPage() {
         {tab === "schedule" && (
           <div className="card">
             <div className="card-head">
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize:16, fontWeight:700 }}>手動填寫班表</div>
-                <div style={{ marginTop:2 }}>
-                  {cycleIsSet
-                    ? <><span className="ap-cycle-title" style={{ fontSize:18, color:"#000", fontWeight:600 }}>{cycleTitleLabel}</span>　<span style={{ fontSize:12, color:"#d1d5db" }}>灰色欄為上週參考，護理師不可見</span></>
-                    : <span style={{ fontSize:12, color:"#9ca3af" }}>點格子選擇班別，填完後「確認送出」</span>}
-                </div>
+                {cycleIsSet ? (
+                  <>
+                    <div style={{ marginTop:2 }}>
+                      <span className="ap-cycle-title" style={{ color:"#000", fontWeight:600, whiteSpace:"nowrap" }}>{cycleTitleLabel}</span>
+                    </div>
+                    <div style={{ marginTop:2, fontSize:12, color:"#d1d5db" }}>灰色欄為上週參考，護理師不可見</div>
+                  </>
+                ) : (
+                  <div style={{ marginTop:2 }}>
+                    <span style={{ fontSize:12, color:"#9ca3af" }}>點格子選擇班別，填完後「確認送出」</span>
+                  </div>
+                )}
               </div>
-              <div style={{ display:"flex", gap:10, alignItems:"center", flexWrap:"wrap" }}>
+              <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"nowrap" }}>
                 {!cycleIsSet && (
                   <input type="month" value={ym} onChange={e => setYm(e.target.value)} className="finput" style={{ width:150 }} />
                 )}
@@ -1730,7 +1743,9 @@ export default function AdminPage() {
                   )}
                 </div>
                 <button className="btn btn-green" onClick={confirmAll} disabled={confirmingAll}>
-                  {confirmingAll ? "確認中…" : `確認送出（${schedule.filter(r=>!r.confirmed&&r.shift).length} 格待確認）`}
+                  {confirmingAll ? "確認中…" : (
+                    <>確認送出（{schedule.filter(r=>!r.confirmed&&r.shift).length}<span className="ap-desktop-only"> 格待確認</span>）</>
+                  )}
                 </button>
               </div>
             </div>

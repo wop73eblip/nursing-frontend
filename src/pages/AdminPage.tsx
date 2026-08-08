@@ -395,15 +395,19 @@ export default function AdminPage() {
     start_date: "", end_date: "", period_days: 28,
     deadline_date: "", deadline_time: "23:59", holiday_days: 0,
   };
+  // 若 localStorage 有 cache 則首個 render 直接是最後一次的 cycle（不 flash）
+  const _hasCachedCycle = (() => {
+    try { return !!localStorage.getItem("adminCycle"); } catch { return false; }
+  })();
   const [cycle, setCycle] = useState<CycleState>(() => {
-    // 從 localStorage 即刻 hydrate 上次已知的 cycle，避免登入後先閃「點格子選擇」空狀態
-    // API 回來若有變會覆蓋
     try {
       const cached = localStorage.getItem("adminCycle");
       if (cached) return { ...CYCLE_DEFAULT, ...JSON.parse(cached) };
     } catch {}
     return CYCLE_DEFAULT;
   });
+  // 首次 fetchRules 是否已完成（用來區分「還沒抓」vs「抓完了但沒設 cycle」）
+  const [rulesFetched, setRulesFetched] = useState(_hasCachedCycle);
 
   // 排班規則
   const [rulesForm, setRulesForm] = useState({
@@ -883,6 +887,7 @@ export default function AdminPage() {
       if (r.shifts?.rest) { setRestShifts(r.shifts.rest); setEditRestShifts(r.shifts.rest); }
       if (r.shifts?.off)  { setOffShifts(r.shifts.off);  setEditOffShifts(r.shifts.off);   }
     } catch {}
+    finally { setRulesFetched(true); }
   }
 
   function showToast(msg: string, ok = true) {
@@ -1708,6 +1713,10 @@ export default function AdminPage() {
                     </div>
                     <div style={{ marginTop:2, fontSize:12, color:"#d1d5db" }}>灰色欄為上週參考，護理師不可見</div>
                   </>
+                ) : !rulesFetched ? (
+                  <div style={{ marginTop:2 }}>
+                    <span style={{ fontSize:12, color:"#9ca3af" }}>載入中…</span>
+                  </div>
                 ) : (
                   <div style={{ marginTop:2 }}>
                     <span style={{ fontSize:12, color:"#9ca3af" }}>點格子選擇班別，填完後「確認送出」</span>

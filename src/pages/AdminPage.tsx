@@ -1782,7 +1782,17 @@ export default function AdminPage() {
 
             {/* 統計 */}
             <div style={{ padding:"10px 20px", display:"flex", flexWrap:"wrap", gap:"8px 18px", alignItems:"center", borderBottom:"1px solid #f3f4f6", fontSize:13 }}>
-              <span style={{ color:"#9ca3af", fontWeight:400 }}>共 {nurseUsers.length} 人</span>
+              {(() => {
+                const trainees = nurseUsers.filter(u => u.is_trainee).length;
+                const clinical = nurseUsers.length - trainees;
+                return (
+                  <span style={{ color:"#9ca3af", fontWeight:400 }}>
+                    共 {nurseUsers.length} 人{trainees > 0 && (
+                      <span style={{ marginLeft:6, fontSize:12 }}>（臨床 {clinical}、新人 {trainees}）</span>
+                    )}
+                  </span>
+                );
+              })()}
               <span style={{ marginLeft:"auto", fontSize:12, color:"#6b7280" }}>
                 已確認 {schedule.filter(r=>cycleDays.includes(r.date)&&r.confirmed&&r.shift).length} 格 ／
                 待確認 {schedule.filter(r=>cycleDays.includes(r.date)&&!r.confirmed&&r.shift).length} 格

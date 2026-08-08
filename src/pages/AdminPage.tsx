@@ -27,7 +27,7 @@ const DEFAULT_OFF: ShiftDef[] = [
 const ROLE_ABBR:   Record<string,string> = { nurse:"護", dual:"兼", admin:"管", superadmin:"超" };
 
 // ─── Types
-type Tab = "schedule"|"users"|"cycle"|"rules"|"rules_overview"|"shifts_cfg"|"generate"|"logs"|"home_modules";
+type Tab = "schedule"|"users"|"cycle"|"rules"|"rules_overview"|"shifts_cfg"|"generate"|"logs";
 
 interface ShiftDef { code: string; label: string; type: "work"|"rest"|"off"; admin_only?: boolean; }
 interface User {
@@ -426,16 +426,6 @@ export default function AdminPage() {
   // 已儲存快照（一鍵生成頁籤只顯示已寫入資料庫的值，避免誤以為已儲存）
   const [savedCycle, setSavedCycle] = useState<typeof cycle | null>(null);
   const [savedRules, setSavedRules] = useState<typeof rulesForm | null>(null);
-  // 登入畫面自訂（空字串＝用預設）
-  // 首頁模組卡片自訂（大標/小標/圖片可改；卡片本身與可否點擊由程式控制）
-  const DEFAULT_MODULE_META = [
-    { key: "schedule", title: "排班系統", tagline: "不來預班就沒得預班囉～" },
-    { key: "data",     title: "學習系統", tagline: "護理訓練小遊戲" },
-  ];
-  const [moduleCfgs, setModuleCfgs] = useState<{ key: string; title: string; tagline: string; image: string }[]>(
-    DEFAULT_MODULE_META.map(d => ({ ...d, image: "" }))
-  );
-  const [savingModules, setSavingModules] = useState(false);
   // 帳號管理：attr 變更提示
   const [attrChangeWarn, setAttrChangeWarn] = useState<{ uid: string; oldAttr: string; newAttr: string } | null>(null);
   const [deleteShiftTarget, setDeleteShiftTarget] = useState<{type:"work"|"rest"|"off"; idx:number; code:string} | null>(null);
@@ -877,35 +867,7 @@ export default function AdminPage() {
       if (r.shifts?.work) { setWorkShifts(r.shifts.work); setEditWorkShifts(r.shifts.work); }
       if (r.shifts?.rest) { setRestShifts(r.shifts.rest); setEditRestShifts(r.shifts.rest); }
       if (r.shifts?.off)  { setOffShifts(r.shifts.off);  setEditOffShifts(r.shifts.off);   }
-      if (r.modules) {
-        const saved: Record<string, any> = Object.fromEntries((r.modules as any[]).map(m => [m.key, m]));
-        setModuleCfgs(DEFAULT_MODULE_META.map(d => ({
-          key: d.key,
-          title: saved[d.key]?.title ?? d.title,
-          tagline: saved[d.key]?.tagline ?? d.tagline,
-          image: saved[d.key]?.image ?? "",
-        })));
-      }
     } catch {}
-  }
-
-
-  async function saveModuleConfig() {
-    setSavingModules(true);
-    try {
-      // 學習系統卡片改由「學習系統後台」管理，這裡只送非 data 模組（後端依 key 合併）
-      await api.post("/rules", { rules: { modules: moduleCfgs.filter(m => m.key !== "data") } });
-      showToast("✓ 首頁模組已儲存");
-    } catch (err: any) {
-      showToast("✗ " + (err.response?.data?.detail ?? err.message ?? "儲存失敗"), false);
-    } finally { setSavingModules(false); }
-  }
-
-  function onModuleImagePick(key: string, file: File) {
-    if (file.size > 800 * 1024) { showToast("✗ 圖片請小於 800KB", false); return; }
-    const reader = new FileReader();
-    reader.onload = () => setModuleCfgs(p => p.map(m => m.key === key ? { ...m, image: String(reader.result) } : m));
-    reader.readAsDataURL(file);
   }
 
   function showToast(msg: string, ok = true) {
@@ -1433,7 +1395,6 @@ export default function AdminPage() {
     { key:"generate",   label:"一鍵生成" },
     { key:"users",      label:"帳號管理" },
     { key:"shifts_cfg", label:"班別設定" },
-    { key:"home_modules", label:"首頁模組" },
     { key:"logs",       label:"操作紀錄" },
   ];
 
@@ -3653,72 +3614,6 @@ export default function AdminPage() {
           </div>
           );
         })()}
-
-        {/* ── Tab: 首頁模組 */}
-        {tab === "home_modules" && (
-          <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth:640 }}>
-            <div className="card">
-              <div className="card-head"><div style={{ fontSize:16, fontWeight:700 }}>首頁模組卡片</div></div>
-              <div className="card-body">
-                <div className="fl">
-                  <div style={{ fontSize:12, color:"#9ca3af", marginBottom:4 }}>
-                    登入後首頁的模組卡片。可自訂各卡片的大標、小標、圖片；留空欄位用預設。
-                  </div>
-                  {moduleCfgs.filter(m => m.key !== "data").map(m => {
-                    const meta = DEFAULT_MODULE_META.find(d => d.key === m.key);
-                    const disabled = m.key === "data";
-                    return (
-                      <div key={m.key} className="setting-section" style={{ border:"1px solid #eef2f7", borderRadius:12, padding:14 }}>
-                        <div className="setting-title">
-                          {meta?.title ?? m.key}
-                          {disabled && <span style={{ fontSize:11, color:"#94a3b8", fontWeight:600, marginLeft:6 }}>（即將推出，卡片顯示但暫不可點）</span>}
-                        </div>
-                        {/* 預覽 */}
-                        <div style={{ display:"flex", alignItems:"center", gap:14, padding:"12px 10px", background:"#f0f4f8", borderRadius:12, marginBottom:12 }}>
-                          <div style={{ width:64, height:64, borderRadius:"22.37%", background: m.image ? "transparent" : (m.key==="schedule"?"#e0edff":"#e7f6ec"), display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", fontSize:30, flexShrink:0 }}>
-                            {m.image ? <img src={m.image} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} /> : <span>{m.key==="schedule"?"🗓️":"🗂️"}</span>}
-                          </div>
-                          <div>
-                            <div style={{ fontSize:16, fontWeight:800, color:"#0f172a" }}>{m.title || meta?.title}</div>
-                            <div style={{ fontSize:12, color:"#94a3b8", marginTop:2 }}>{m.tagline || meta?.tagline}</div>
-                          </div>
-                        </div>
-                        {/* 圖片 */}
-                        <div style={{ marginBottom:10 }}>
-                          <div style={{ fontSize:12, fontWeight:600, color:"#374151", marginBottom:4 }}>🖼 圖片（留空＝預設圖示）</div>
-                          <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-                            <input type="file" accept="image/*"
-                              onChange={e => { const f = e.target.files?.[0]; if (f) onModuleImagePick(m.key, f); e.currentTarget.value = ""; }} />
-                            {m.image && <button className="btn btn-gray btn-sm" onClick={() => setModuleCfgs(p => p.map(x => x.key===m.key ? { ...x, image:"" } : x))}>移除圖片（回預設）</button>}
-                          </div>
-                          <div style={{ fontSize:11, color:"#9ca3af", marginTop:4 }}>建議正方形，小於 800KB</div>
-                        </div>
-                        {/* 大標 */}
-                        <div style={{ marginBottom:10 }}>
-                          <div style={{ fontSize:12, fontWeight:600, color:"#374151", marginBottom:4 }}>大標</div>
-                          <input className="finput" style={{ maxWidth:360 }} placeholder={meta?.title}
-                            value={m.title} onChange={e => setModuleCfgs(p => p.map(x => x.key===m.key ? { ...x, title:e.target.value } : x))} />
-                        </div>
-                        {/* 小標 */}
-                        <div>
-                          <div style={{ fontSize:12, fontWeight:600, color:"#374151", marginBottom:4 }}>小標</div>
-                          <input className="finput" style={{ maxWidth:360 }} placeholder={meta?.tagline}
-                            value={m.tagline} onChange={e => setModuleCfgs(p => p.map(x => x.key===m.key ? { ...x, tagline:e.target.value } : x))} />
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-                    <button className="btn btn-primary" onClick={saveModuleConfig} disabled={savingModules}>
-                      {savingModules ? "儲存中…" : "儲存首頁模組"}
-                    </button>
-                    <span style={{ fontSize:12, color:"#9ca3af" }}>儲存後下次進首頁即套用</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* ══════════════════════════════════
             Tab: 操作紀錄

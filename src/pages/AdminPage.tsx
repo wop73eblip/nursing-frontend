@@ -1436,7 +1436,7 @@ export default function AdminPage() {
         /* Layout */
         .ap-root { max-width: 100vw; box-sizing: border-box; }
         .ap-body { max-width: 1400px; margin: 0 auto; padding: 20px 16px 80px; box-sizing: border-box; width: 100%; }
-        .card { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; box-sizing: border-box; width: 100%; }
+        .card { background: #fff; border-radius: 12px; border: 1px solid #e5e7eb; box-sizing: border-box; width: 100%; overflow: hidden; }
         .card-head { padding: 16px 20px 12px; border-bottom: 1px solid #f3f4f6; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
         .card-body { padding: 20px; box-sizing: border-box; }
 
@@ -1617,8 +1617,8 @@ export default function AdminPage() {
         .setting-title { font-size: 13px; font-weight: 700; color: #374151; margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
 
         @media (max-width: 640px) {
-          .frow { grid-template-columns: 1fr; }
-          .frow3 { grid-template-columns: 1fr; }
+          .frow  { grid-template-columns: minmax(0, 1fr); }
+          .frow3 { grid-template-columns: minmax(0, 1fr); }
           .ap-body { padding: 12px 10px 80px; }
           .card-body { padding: 14px; }
         }

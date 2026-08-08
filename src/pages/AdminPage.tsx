@@ -1638,9 +1638,11 @@ export default function AdminPage() {
           .ap-body { padding: 12px 10px 80px; }
           .card-body { padding: 14px; }
           /* 手動填寫班表：週期標題縮字避免換行；桌面才顯示的字隱藏；按鈕縮 padding 塞同一行 */
-          .ap-cycle-title { font-size: 14px; }
+          .ap-cycle-title { font-size: 16px; }
           .ap-desktop-only { display: none; }
           .card-head .btn { padding: 8px 10px; font-size: 12px; }
+          /* 手機 card-head 縮左右 padding 讓字往邊界靠 */
+          .card-head { padding: 12px 12px 10px; }
         }
       `}</style>
 

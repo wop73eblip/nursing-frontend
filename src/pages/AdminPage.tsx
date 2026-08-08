@@ -1472,10 +1472,20 @@ export default function AdminPage() {
         .finput:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
         .finput-sm { padding: 6px 9px; font-size: 13px; }
         select.finput { cursor: pointer; }
-        /* 日期/時間欄位恢復原生選擇器圖示（時鐘/日曆），可點選 */
-        input[type="date"].finput, input[type="time"].finput { -webkit-appearance: auto; appearance: auto; min-width: 0; }
+        /* 日期/時間欄位：恢復原生選擇器圖示（時鐘/日曆），可點選 */
+        /* iOS 專屬修法：min-width:0 讓 flex/grid 能壓過 native min-content；顯式 height 讓 date/time 高度一致 */
+        input[type="date"].finput, input[type="time"].finput {
+          -webkit-appearance: auto; appearance: auto;
+          min-width: 0; width: 100%;
+          height: 40px; line-height: 20px;
+          padding-top: 0; padding-bottom: 0;
+          display: block;
+        }
         input[type="date"].finput::-webkit-calendar-picker-indicator,
         input[type="time"].finput::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; }
+        /* 移除 iOS 對 date/time 的 auto text-align，讓內容置中一致 */
+        input[type="date"].finput::-webkit-date-and-time-value,
+        input[type="time"].finput::-webkit-date-and-time-value { text-align: left; }
         .fcheck { display: flex; align-items: center; gap: 8px; }
         .fcheck input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #2563eb; }
 
@@ -2365,9 +2375,9 @@ export default function AdminPage() {
                     <div className="setting-title">⏰ 填表截止日</div>
                     <div style={{ maxWidth:380 }}>
                       <label className="flabel">護理師填表截止日期</label>
-                      <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                      <div style={{ display:"flex", gap:8, alignItems:"stretch" }}>
                         <input className="finput" type="date" value={cycle.deadline_date}
-                          onChange={e => setCycle(p=>({...p,deadline_date:e.target.value}))} style={{ flex:1 }} />
+                          onChange={e => setCycle(p=>({...p,deadline_date:e.target.value}))} style={{ flex:1, minWidth:0 }} />
                         <input className="finput" type="time" step={60} value={cycle.deadline_time}
                           onChange={e => setCycle(p=>({...p,deadline_time:e.target.value}))}
                           style={{ width:100, flex:"0 0 100px" }} />

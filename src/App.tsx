@@ -6,6 +6,7 @@ import NursePage from "./pages/NursePage";
 import AdminPage from "./pages/AdminPage";
 import DataPage from "./pages/DataPage";
 import GameAdminPage from "./pages/GameAdminPage";
+import SystemCardsPage from "./pages/SystemCardsPage";
 import { getAuth } from "./auth";
 
 function RequireAuth(
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="/home" element={<RequireAuth><HomePage /></RequireAuth>} />
         <Route path="/data" element={<RequireAuth><DataPage /></RequireAuth>} />
         <Route path="/game-admin" element={<RequireAuth superOnly><GameAdminPage /></RequireAuth>} />
+        <Route path="/system-cards" element={<RequireAuth superOnly><SystemCardsPage /></RequireAuth>} />
         <Route path="/nurse" element={<RequireAuth><NursePage /></RequireAuth>} />
         <Route path="/admin" element={<RequireAuth adminOnly><AdminPage /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/login" replace />} />

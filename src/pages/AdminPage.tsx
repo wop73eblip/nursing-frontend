@@ -383,13 +383,26 @@ export default function AdminPage() {
   const [userSaving, setUserSaving] = useState<Set<string>>(new Set());
 
   // 週期設定
-  const [cycle, setCycle] = useState({
-    start_date: "",      // YYYY-MM-DD
-    end_date: "",        // YYYY-MM-DD
-    period_days: 28,     // 週期長度（天）
-    deadline_date: "",   // 填表截止日 YYYY-MM-DD
-    deadline_time: "23:59", // 填表截止時間 HH:MM
-    holiday_days: 0,     // 國定假日天數 0~5
+  type CycleState = {
+    start_date: string;
+    end_date: string;
+    period_days: number;
+    deadline_date: string;
+    deadline_time: string;
+    holiday_days: number;
+  };
+  const CYCLE_DEFAULT: CycleState = {
+    start_date: "", end_date: "", period_days: 28,
+    deadline_date: "", deadline_time: "23:59", holiday_days: 0,
+  };
+  const [cycle, setCycle] = useState<CycleState>(() => {
+    // 從 localStorage 即刻 hydrate 上次已知的 cycle，避免登入後先閃「點格子選擇」空狀態
+    // API 回來若有變會覆蓋
+    try {
+      const cached = localStorage.getItem("adminCycle");
+      if (cached) return { ...CYCLE_DEFAULT, ...JSON.parse(cached) };
+    } catch {}
+    return CYCLE_DEFAULT;
   });
 
   // 排班規則
@@ -852,6 +865,8 @@ export default function AdminPage() {
             ),
           };
           setSavedCycle(merged);
+          // 快取到 localStorage 供下次登入即刻 hydrate（避免載入 flash）
+          try { localStorage.setItem("adminCycle", JSON.stringify(merged)); } catch {}
           return merged;
         });
       }

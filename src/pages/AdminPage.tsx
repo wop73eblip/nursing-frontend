@@ -1669,7 +1669,7 @@ export default function AdminPage() {
       {/* ── Navbar */}
       <nav className="ap-nav">
         <div className="ap-nav-l">
-          <span style={{ fontSize:16, fontWeight:800, letterSpacing:-.3 }}>🏥 護理排班後台</span>
+          <span style={{ fontSize:16, fontWeight:800, letterSpacing:-.3 }}>護理排班後台</span>
           <span style={{ fontSize:12, opacity:.7 }}>｜{user.name}</span>
         </div>
         <div className="ap-nav-r">

@@ -250,7 +250,21 @@ export default function NursePage() {
   const [restShifts, setRestShifts] = useState<string[]>(DEFAULT_REST);
   const [offShifts, setOffShifts]   = useState<string[]>(DEFAULT_OFF);
   const allOffShifts = [...restShifts, ...offShifts];   // 應休 + 放假調整（計入「休假人數」與紅字著色）
-  const [cycleRange, setCycleRange]  = useState<{ start: string; end: string } | null>(null);
+  // 從 localStorage 即刻 hydrate 上次已知的 cycleRange，避免登入後 flash 空狀態
+  const [cycleRange, setCycleRange] = useState<{ start: string; end: string } | null>(() => {
+    try {
+      const cached = localStorage.getItem("nurseCycleRange");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed?.start && parsed?.end) return parsed;
+      }
+    } catch {}
+    return null;
+  });
+  // 首次 fetch 是否已完成（用來區分「還沒抓」vs「抓完了但沒設 cycle」）
+  const [rulesFetched, setRulesFetched] = useState(() => {
+    try { return !!localStorage.getItem("nurseCycleRange"); } catch { return false; }
+  });
 
   // 全員資料
   const [nurses, setNurses] = useState<NurseInfo[]>([]);
@@ -456,11 +470,15 @@ export default function NursePage() {
       let cycleStart = r.cycle?.start_date ?? "";
       let cycleEnd   = r.cycle?.end_date   ?? "";
       if (cycleStart && cycleEnd) {
-        setCycleRange({ start: cycleStart, end: cycleEnd });
+        const range = { start: cycleStart, end: cycleEnd };
+        setCycleRange(range);
+        try { localStorage.setItem("nurseCycleRange", JSON.stringify(range)); } catch {}
       } else {
         setCycleRange(null);
+        try { localStorage.removeItem("nurseCycleRange"); } catch {}
         cycleStart = ""; cycleEnd = "";
       }
+      setRulesFetched(true);
 
       // 決定要拉哪幾個月的班表
       const monthsToFetch: { year: number; month: number }[] = cycleStart && cycleEnd
@@ -1041,7 +1059,11 @@ export default function NursePage() {
           <div className="month-bar">
             <div>
               <div style={{ fontSize: 15, fontWeight: 700 }}>本期預班表</div>
-              <div style={{ fontSize: 18, color: "#000", fontWeight: 600, marginTop: 2 }} className="np-cycle-title">{cycleTitleLabel}</div>
+              {cycleRange ? (
+                <div style={{ fontSize: 18, color: "#000", fontWeight: 600, marginTop: 2 }} className="np-cycle-title">{cycleTitleLabel}</div>
+              ) : !rulesFetched ? (
+                <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>載入中…</div>
+              ) : null}
               <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>
                 藍色列為您的班表，點格子可填寫；其他同事為唯讀
               </div>
@@ -1049,7 +1071,7 @@ export default function NursePage() {
                 手機關閉直向鎖定、橫向可觀看比較多日期
               </div>
             </div>
-            {!cycleRange && (
+            {!cycleRange && rulesFetched && (
               <input type="month" value={ym} onChange={e => setYm(e.target.value)} />
             )}
           </div>

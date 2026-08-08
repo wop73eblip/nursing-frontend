@@ -1,5 +1,14 @@
+# 主 App HTML 不快取（每次跟伺服器確認 index.html 版本），
+# 避免部署新版後使用者一直看到舊畫面。
+/*
+  Cache-Control: no-cache
+
+# JS/CSS/圖片等資產是內容雜湊命名（如 assets/index-hv7DBIdm.js），
+# 檔名一變即知道是新檔，可以放心讓瀏覽器/CDN 長期快取。
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
 # 遊戲檔案不給瀏覽器快取（每次都跟伺服器確認版本），
 # 避免部署新版後玩家還在跑舊的 HTML/JS/JSON 造成「載入存檔失敗」等怪問題。
-# 圖片等大檔仍會回 304 Not Modified，流量成本很低。
 /game/*
   Cache-Control: no-cache

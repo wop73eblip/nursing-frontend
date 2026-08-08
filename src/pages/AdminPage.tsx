@@ -1472,17 +1472,21 @@ export default function AdminPage() {
         .finput:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
         .finput-sm { padding: 6px 9px; font-size: 13px; }
         select.finput { cursor: pointer; }
-        /* 日期/時間欄位：恢復原生選擇器圖示（時鐘/日曆），可點選 */
-        /* 高度固定 40px 讓 date/time 兩者一致（iOS date 原本會比較高）；padding 0 讓 iOS 內容置中 */
+        /* 日期/時間欄位：選項 5「完全無 icon」— appearance:none 徹底移除 iOS shadow DOM，
+           同時解決 iOS 超框 + date/time 高度不一致問題；tap 仍會開 iOS 原生日曆/時鐘選單（type 決定的） */
         input[type="date"].finput, input[type="time"].finput {
-          -webkit-appearance: auto; appearance: auto;
+          -webkit-appearance: none; appearance: none;
           min-width: 0; width: 100%;
           height: 40px;
           padding: 0 12px;
           box-sizing: border-box;
         }
         input[type="date"].finput::-webkit-calendar-picker-indicator,
-        input[type="time"].finput::-webkit-calendar-picker-indicator { opacity: 1; cursor: pointer; }
+        input[type="time"].finput::-webkit-calendar-picker-indicator { display: none; -webkit-appearance: none; }
+        input[type="date"].finput::-webkit-inner-spin-button,
+        input[type="time"].finput::-webkit-inner-spin-button { display: none; -webkit-appearance: none; }
+        /* 佔位提示（空值時）文字對齊左邊 */
+        input[type="date"].finput, input[type="time"].finput { text-align: left; }
         .fcheck { display: flex; align-items: center; gap: 8px; }
         .fcheck input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #2563eb; }
 

@@ -425,7 +425,7 @@ export default function AdminPage() {
     weekly_max_off_total: 3,       // 規則7：含指定休每週上限
     one_in_seven: true,            // 規則8：一例一休（每週≥2天休）
     lock_designated_off: true,     // 規則10：指定休不可覆蓋
-    allow_fixed_deviation: true,   // 固定班可偏離最多2格；未勾＝完全不可偏離
+    allow_fixed_deviation: false,  // 固定班可偏離最多2格；未勾（預設）＝完全不可偏離
     notes: "",
   });
 
@@ -2565,15 +2565,6 @@ export default function AdminPage() {
                         onChange={n => setRulesForm(p=>({...p,max_consecutive_work:n}))} />
                     </div>
                     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-                      <div style={{ fontSize:13, display:"flex", alignItems:"flex-start", gap:6 }}>
-                        <span style={{ color:"#16a34a", fontWeight:700 }}>✓</span>
-                        <div>
-                          每週 D/E/N 至多兩種班別（<b>固定啟用，不可關閉</b>）<br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>
-                            若預填出現班屬外班別（如輪班DE填入N），該週自動改為「例外班種＋一種原班別」，其餘週仍維持原班屬
-                          </span>
-                        </div>
-                      </div>
                       <label className="fcheck">
                         <input type="checkbox" checked={rulesForm.lock_first_day}
                           onChange={e => setRulesForm(p=>({...p,lock_first_day:e.target.checked}))} />
@@ -2642,13 +2633,6 @@ export default function AdminPage() {
                         </div>
                       </div>
                     </div>
-                  </div>
-
-                  <div className="setting-section">
-                    <div className="setting-title">📝 備註說明</div>
-                    <textarea className="finput" rows={2} style={{ resize:"vertical" }}
-                      value={rulesForm.notes} onChange={e => setRulesForm(p=>({...p,notes:e.target.value}))}
-                      placeholder="其他排班注意事項或補充說明" />
                   </div>
 
                   <button className="btn btn-primary" style={{ alignSelf:"flex-start" }} onClick={saveSchedulingRules}>
@@ -3432,38 +3416,35 @@ export default function AdminPage() {
                     );
                   })()}
 
-                  {/* ── 順班規則說明 */}
-                  <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:10, padding:"14px 16px", fontSize:13, color:"#1e40af", lineHeight:1.8 }}>
-                    <b>順班規則：只罰「多餘換班」，必要換班不罰（固定啟用）</b><br />
-                    <span style={{ color:"#374151" }}>
-                      • <b>必要換班</b>：輪班本來就要上多種班，一定要換的次數＝班種數−1（2種班1次、DEN 2次、固定班0次）→ <b>這些不罰</b>。<br />
-                      • <b>多餘換班</b>（超過必要數）：每次 <b>+1500</b>。<br />
-                      • <b>沒休就換</b>（直接切換、沒先排 OFF）：每次另加 <b>+500</b>（必要或多餘皆計，引導先休一天再換）。<br />
-                      &emsp;→ 必要+有休 <b>0</b>｜必要+沒休 <b>500</b>｜多餘+有休 <b>1500</b>｜多餘+沒休 <b>2000</b>
-                    </span>
-                  </div>
-
-                  {/* ── 將套用的規則 */}
-                  <div className="setting-section">
-                    <div className="setting-title">將套用的規則</div>
-                    <div style={{ display:"flex", flexDirection:"column", gap:5, fontSize:12, color:"#374151", lineHeight:1.7 }}>
-                      <div style={{ fontWeight:700, color:"#6b7280", fontSize:11 }}>── 硬規則 ──</div>
-                      <div>每班每日人數：D = <b>{dRules.daily_d}</b>、E = <b>{dRules.daily_e}</b>、N = <b>{dRules.daily_n}</b> 人
-                        {dRules.special_dates.filter(sd => sd.date && dCycleDays.includes(sd.date)).length > 0 && (
-                          <span style={{ marginLeft:8, color:"#b45309", fontWeight:600 }}>
-                            ＋特殊日期覆蓋：{dRules.special_dates.filter(sd => sd.date && dCycleDays.includes(sd.date)).map(sd =>
-                              `${sd.date}（D${sd.d}E${sd.e}N${sd.n}）`).join("、")}
-                          </span>
-                        )}
+                  {/* ── 三個版本差異說明 */}
+                  <div className="setting-section" style={{ background:"#f8fafc" }}>
+                    <div className="setting-title">🎯 三個版本差異</div>
+                    <div style={{ display:"flex", flexDirection:"column", gap:12, fontSize:13, color:"#374151", lineHeight:1.7 }}>
+                      <div>
+                        <span style={{ display:"inline-block", padding:"2px 10px", background:"#dbeafe", color:"#1d4ed8", borderRadius:999, fontWeight:800, fontSize:12, marginRight:6 }}>分數最高版</span>
+                        <b style={{ color:"#6b7280", fontSize:12, fontWeight:500 }}>balanced · 預設 · 綜合平衡</b>
+                        <div style={{ fontSize:12, color:"#6b7280", marginTop:3 }}>
+                          全部懲罰值用<b>原倍率</b>：換班 1500、比例 900、孤立 750、固定班 500…
+                          總懲罰分數在三版中通常最低。適合大多數情況、想要各面向兼顧。
+                        </div>
                       </div>
-                      <div>反向班禁止：<b>✓ 固定啟用</b>　一例一休（每週至少 2 天休）：<b>{dRules.one_in_seven ? "✓" : "停用"}</b>　每週至多兩種班別：<b>✓ 固定啟用</b></div>
-                      <div>連續上班上限 <b>{dRules.max_consecutive_work}</b> 天（含跨週計算）　連續 OFF 總上限 <b>{dRules.weekly_max_off_total}</b> 天</div>
-                      <div>自動休連續上限 <b>{dRules.weekly_max_off_auto}</b> 天　指定休不可覆蓋：<b>{dRules.lock_designated_off ? "✓" : "停用"}</b>　第一天鎖定：<b>{dRules.lock_first_day ? "✓" : "停用"}</b></div>
-                      <div>每班每日人數恰好符合：<b>✓ 硬性</b>　每週至少 1 天休：<b>✓ 硬性</b>　一例一休（每週≥2天休）：<b>{dRules.one_in_seven ? "✓ 硬性" : "停用"}</b>　每班至少 1 位 leader＋2 位 leader/second：<b>✓ 硬性</b></div>
-                      <div style={{ fontWeight:700, color:"#6b7280", fontSize:11, marginTop:2 }}>── 軟規則 ──</div>
-                      <div>固定班偏離（+500/格）：{dRules.allow_fixed_deviation === false ? "不允許偏離（0 格，只排該班）" : "最多 2 格"}；公平優先版一律 0 格</div>
-                      <div>順班：只罰多餘換班（+1500/次）＋沒休就換（+500/次）；必要換班不罰　孤立上班日（+750）　班次比例 ±1 天彈性（+900）</div>
-                      <div>班次比例硬上限：全職／半職皆 各班種偏離理想 ±2 天（例 10:10 最極限 8:12；預填已超過時自動讓路）</div>
+                      <div>
+                        <span style={{ display:"inline-block", padding:"2px 10px", background:"#dcfce7", color:"#15803d", borderRadius:999, fontWeight:800, fontSize:12, marginRight:6 }}>順班優先版</span>
+                        <b style={{ color:"#6b7280", fontSize:12, fontWeight:500 }}>smooth · 少換班</b>
+                        <div style={{ fontSize:12, color:"#6b7280", marginTop:3 }}>
+                          <b>換班懲罰 ×2</b>(3000 / 1000)。求解器更用力壓「多餘換班」與「沒休就換」次數,
+                          班表更整齊、每人的班種切換較少。代價:比例可能更偏、孤立日略多。
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ display:"inline-block", padding:"2px 10px", background:"#f3e8ff", color:"#6b21a8", borderRadius:999, fontWeight:800, fontSize:12, marginRight:6 }}>公平優先版</span>
+                        <b style={{ color:"#6b7280", fontSize:12, fontWeight:500 }}>fair · 比例貼近理想</b>
+                        <div style={{ fontSize:12, color:"#6b7280", marginTop:3 }}>
+                          <b>比例/公平懲罰 ×2</b>(1800 / 800),各護理師的 D/E/N 天數更貼近設定比例。
+                          <b>固定班強制 0 偏離</b>(固定 D 只排 D,不受「允許固定班偏離」影響)。
+                          代價:人力吃緊時可能生成失敗(fair 這版無解,不影響其他兩版)。
+                        </div>
+                      </div>
                     </div>
                   </div>
 

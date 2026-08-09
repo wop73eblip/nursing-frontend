@@ -458,6 +458,9 @@ export default function AdminPage() {
 
   // Generate tab state（必須在頂層，不可放 IIFE 內）
   const [generating, setGenerating] = useState(false);
+  // 一鍵生成的取消機制：abortRef 中止當下正在跑的 axios,cancelRef flag 讓迴圈到下個 profile 前就 break
+  const genAbortRef = useRef<AbortController | null>(null);
+  const genCanceledRef = useRef(false);
   const [genResult, setGenResult] = useState<string>("");
   const [genDemand, setGenDemand] = useState<{ daily_d:number; daily_e:number; daily_n:number; special_dates_count:number; total_work_demand:number } | null>(null);
   const [confirmGenerate, setConfirmGenerate] = useState(false);
@@ -3177,19 +3180,29 @@ export default function AdminPage() {
           const confirmedCount   = schedule.filter(r => dCycleDays.includes(r.date) && r.confirmed && r.shift).length;
           const filledCount      = schedule.filter(r => dCycleDays.includes(r.date) && r.shift).length;
 
+          function cancelGenerate() {
+            genCanceledRef.current = true;
+            try { genAbortRef.current?.abort(); } catch {}
+          }
+
           async function runGenerate() {
+            genCanceledRef.current = false;
             setGenerating(true);
             setGenResult(""); setCommitResult("");
             setGenVersions({}); setSelectedProfile(null);
             setConfirmGenerate(false);
             const results: Partial<Record<GenProfileKey, GenVersion>> = {};
             for (const p of GEN_PROFILES) {
+              if (genCanceledRef.current) break;
+              const controller = new AbortController();
+              genAbortRef.current = controller;
               try {
                 const hint = lastGenSchedules[p.key];   // 暖啟動：本 profile 上次的解
                 const body = hint ? { hint_schedules: hint } : {};
                 const { data } = await api.post(
                   `/schedule/generate?overwrite_confirmed=false&profile=${p.key}`,
                   body,
+                  { signal: controller.signal },
                 );
                 results[p.key] = {
                   schedules: data.schedules,
@@ -3202,6 +3215,10 @@ export default function AdminPage() {
                 };
                 setGenDemand(data.demand_config ?? null);
               } catch (err: any) {
+                // 使用者取消 → 直接離開迴圈,不記為失敗
+                if (genCanceledRef.current || err?.code === "ERR_CANCELED" || err?.name === "CanceledError") {
+                  break;
+                }
                 results[p.key] = {
                   schedules: {}, cycle_dates: [], message: "", warnings: [], anomalies: [],
                   prefill_warnings: [], metrics: null,
@@ -3210,6 +3227,7 @@ export default function AdminPage() {
               }
               setGenVersions({ ...results });
             }
+            genAbortRef.current = null;
             setGenerating(false);
             // 更新暖啟動記憶（只記成功的版本；失敗的保留舊值以免下次拿不到 hint）
             const nextHints = { ...lastGenSchedules };
@@ -3221,7 +3239,13 @@ export default function AdminPage() {
             }
             setLastGenSchedules(nextHints);
             const okCount = Object.values(results).filter(v => v && !v.error).length;
-            setGenResult(okCount === 0 ? "✗ 三個版本皆生成失敗" : `✓ 已生成 ${okCount}／3 個版本，請比較後選擇一版匯入`);
+            if (genCanceledRef.current) {
+              setGenResult(okCount === 0
+                ? "⚠ 已取消生成"
+                : `⚠ 已取消，保留已生成 ${okCount}／3 個版本`);
+            } else {
+              setGenResult(okCount === 0 ? "✗ 三個版本皆生成失敗" : `✓ 已生成 ${okCount}／3 個版本，請比較後選擇一版匯入`);
+            }
           }
 
           async function runCommit() {
@@ -3478,23 +3502,33 @@ export default function AdminPage() {
                   </div>
 
                   {/* ── 生成按鈕 */}
-                  {confirmGenerate ? (
+                  {generating ? (
+                    <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:10, padding:"12px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12, flexWrap:"wrap" }}>
+                      <div style={{ fontSize:13, color:"#1e40af" }}>
+                        <b>生成中…</b>
+                        <span style={{ color:"#64748b", marginLeft:6 }}>三個版本依序生成中,可能需要 1~3 分鐘</span>
+                      </div>
+                      <button
+                        className="btn btn-sm"
+                        style={{ background:"#dc2626", color:"#fff", fontWeight:700 }}
+                        onClick={cancelGenerate}
+                      >取消生成</button>
+                    </div>
+                  ) : confirmGenerate ? (
                     <div style={{ background:"#fef9c3", border:"1px solid #fde68a", borderRadius:10, padding:"12px 16px" }}>
                       <div style={{ fontSize:13, fontWeight:700, color:"#92400e", marginBottom:8 }}>
                         確定要生成班表嗎？將依序生成三個版本供比較（只填入空白格子，已填班別一律保留）
                       </div>
                       <div style={{ display:"flex", gap:8 }}>
                         <button className="btn btn-gray btn-sm" onClick={() => setConfirmGenerate(false)}>取消</button>
-                        <button className="btn btn-primary btn-sm" onClick={runGenerate} disabled={generating}>
-                          {generating ? "生成中…" : "確認生成"}
-                        </button>
+                        <button className="btn btn-primary btn-sm" onClick={runGenerate}>確認生成</button>
                       </div>
                     </div>
                   ) : (
                     <button
                       className="btn btn-primary"
                       style={{ alignSelf:"flex-start" }}
-                      disabled={!dCycleIsSet || generating}
+                      disabled={!dCycleIsSet}
                       onClick={() => setConfirmGenerate(true)}>
                       一鍵生成排班
                     </button>

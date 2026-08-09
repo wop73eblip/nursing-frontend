@@ -3314,10 +3314,14 @@ export default function AdminPage() {
                           ? `排班週期：${dCycle.start_date} ～ ${dCycle.end_date}（${dCycle.period_days} 天）`
                           : "尚未設定排班週期，請先至「排班週期」tab 設定"}
                       />
-                      <CheckItem
-                        ok={schedulableNurses.length > 0}
-                        label={`護理師人數：${schedulableNurses.length} 人（不含行政人員）`}
-                      />
+                      {(() => {
+                        const _tr = schedulableNurses.filter(u => u.is_trainee).length;
+                        const _cl = schedulableNurses.length - _tr;
+                        const lbl = _tr > 0
+                          ? `護理師人數：${schedulableNurses.length} 人（不含行政；臨床 ${_cl}、新人 ${_tr}）`
+                          : `護理師人數：${schedulableNurses.length} 人（不含行政人員）`;
+                        return <CheckItem ok={schedulableNurses.length > 0} label={lbl} />;
+                      })()}
                       <CheckItem
                         ok={true}
                         label={`全職應休 ${dFullOff} 天｜半職應休 ${dPartOff} 天`}
@@ -3335,8 +3339,11 @@ export default function AdminPage() {
                   {/* ── 人力試算 */}
                   {(() => {
                     const n = dCycle.period_days;
-                    const fullNurses  = schedulableNurses.filter(u => !u.halftime).length;
-                    const halfNurses  = schedulableNurses.filter(u =>  u.halftime).length;
+                    // 新人不佔臨床人力名額（H15）；人力試算只算非新人
+                    const clinicalNurses = schedulableNurses.filter(u => !u.is_trainee);
+                    const traineeCount = schedulableNurses.filter(u => u.is_trainee).length;
+                    const fullNurses  = clinicalNurses.filter(u => !u.halftime).length;
+                    const halfNurses  = clinicalNurses.filter(u =>  u.halftime).length;
                     // 非臨床/請假類已填班別統計：D/E/N/OFF/半 以外全部計入（未來新增班別自動涵蓋）
                     const _baseShifts = ["D", "E", "N", "OFF", "半"];
                     const _schedulableUids = new Set(schedulableNurses.map(u => u.uid));
@@ -3376,6 +3383,11 @@ export default function AdminPage() {
                           <div>預設每日需求：<b>D{dRules.daily_d}＋E{dRules.daily_e}＋N{dRules.daily_n}＝{defaultDaily} 人</b></div>
                           <div>全職 {fullNurses} 人 × 可上 {n - dFullOff} 天 ＝ {fullNurses * (n - dFullOff)}</div>
                           <div>半職 {halfNurses} 人 × 可上 {dPartWork} 天 ＝ {halfNurses * dPartWork}</div>
+                          {traineeCount > 0 && (
+                            <div style={{ gridColumn:"1 / -1", fontSize:11, color:"#6b7280" }}>
+                              另有 <b>{traineeCount}</b> 位新人參與排班（照規則排、跟隨導師）但不計入臨床人力
+                            </div>
+                          )}
                           <div>可提供總人力：<b>{totalAvailable}</b></div>
                           <div>需求總人力：<b>{totalRequired}</b>
                             {specialCount > 0 && <span style={{ color:"#6b7280", fontSize:11 }}>（含 {specialCount} 個特殊日）</span>}

@@ -2666,8 +2666,8 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {/* ── ⚙ 進階調參(懲罰值) — 摺疊預設收起,一般 admin 不用打開 */}
-                  {(() => {
+                  {/* ── ⚙ 進階調參(懲罰值) — 僅 superadmin 可見(存進 rules.penalties 影響所有人排班,權限收緊) */}
+                  {isSuperAdmin && (() => {
                     type PenMeta = { key: string; label: string; def: number; min: number; max: number; step?: number; cat: string; tip: string };
                     const PENALTY_META: PenMeta[] = [
                       { key:"EXCESS_SWITCH_PENALTY",  label:"多餘換班",       def:1500, min:0, max:20000, cat:"順班",     tip:"S8:輪班超過必要換班數的每次罰。拉高 → 班表更整齊、少換班,代價可能孤立日增加" },

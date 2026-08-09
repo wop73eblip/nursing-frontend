@@ -2194,10 +2194,17 @@ export default function AdminPage() {
                           新人
                         </label>
                         {curTrainee && (
-                          <select value={curMentor} onChange={e => setUserEdit(u.uid, { mentor_uid: e.target.value })}
-                            style={{ ...sel, maxWidth: 150 }} title="導師（新人跟隨此人排班）">
+                          <select value={curMentor} onChange={e => {
+                            const mUid = e.target.value;
+                            const mentor = mentorOptions.find(mo => mo.uid === mUid);
+                            // 選導師時,新人的輪班屬性自動跟隨導師（確保 CP-SAT 能真的排出跟老師相同的班）
+                            setUserEdit(u.uid, mentor
+                              ? { mentor_uid: mUid, attr: mentor.attr }
+                              : { mentor_uid: mUid });
+                          }}
+                            style={{ ...sel, maxWidth: 150 }} title="導師（新人跟隨此人排班；選定後新人 attr 自動跟隨導師）">
                             <option value="">— 選導師 —</option>
-                            {mentorOptions.map(mo => <option key={mo.uid} value={mo.uid}>{mo.name}</option>)}
+                            {mentorOptions.map(mo => <option key={mo.uid} value={mo.uid}>{mo.name}（{mo.attr}）</option>)}
                           </select>
                         )}
                       </div>
@@ -2335,11 +2342,19 @@ export default function AdminPage() {
                     </div>
                     {newUser.is_trainee && (
                       <div>
-                        <label className="flabel">導師（新人跟隨此人排班，可留空）</label>
+                        <label className="flabel">導師（新人跟隨此人排班,可留空;選定後 attr 自動跟隨導師）</label>
                         <select className="finput" style={{ maxWidth:240 }} value={newUser.mentor_uid}
-                          onChange={e => setNewUser(p=>({...p, mentor_uid:e.target.value}))}>
+                          onChange={e => {
+                            const mUid = e.target.value;
+                            const mentor = nurseUsers.find(x => x.uid === mUid);
+                            setNewUser(p => ({
+                              ...p,
+                              mentor_uid: mUid,
+                              ...(mentor ? { attr: mentor.attr } : {}),
+                            }));
+                          }}>
                           <option value="">— 選導師 —</option>
-                          {nurseUsers.filter(x => x.level === "leader" && !x.admin_staff && !x.is_trainee && !x.halftime).map(mo => <option key={mo.uid} value={mo.uid}>{mo.name}</option>)}
+                          {nurseUsers.filter(x => x.level === "leader" && !x.admin_staff && !x.is_trainee && !x.halftime).map(mo => <option key={mo.uid} value={mo.uid}>{mo.name}（{mo.attr}）</option>)}
                         </select>
                       </div>
                     )}

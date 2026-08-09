@@ -458,6 +458,8 @@ export default function AdminPage() {
 
   // Generate tab state（必須在頂層，不可放 IIFE 內）
   const [generating, setGenerating] = useState(false);
+  // 進階調參:懲罰值 & 求解器參數（後台 UI 可調,存 rules.penalties;優先序 DB > env > 硬編 default）
+  const [penaltyForm, setPenaltyForm] = useState<Record<string, number>>({});
   // 一鍵生成的取消機制：abortRef 中止當下正在跑的 axios,cancelRef flag 讓迴圈到下個 profile 前就 break
   const genAbortRef = useRef<AbortController | null>(null);
   const genCanceledRef = useRef(false);
@@ -885,6 +887,7 @@ export default function AdminPage() {
         });
       }
       if (r.ratio) setRatioForm(prev => ({ ...prev, ...r.ratio }));
+      if (r.penalties) setPenaltyForm(r.penalties);
       if (r.ratio_overrides) setRatioOverrides(r.ratio_overrides);
       if (r.shifts?.work) { setWorkShifts(r.shifts.work); setEditWorkShifts(r.shifts.work); }
       if (r.shifts?.rest) { setRestShifts(r.shifts.rest); setEditRestShifts(r.shifts.rest); }
@@ -1259,7 +1262,7 @@ export default function AdminPage() {
   }
   async function saveSchedulingRules() {
     try {
-      await api.post("/rules", { rules: { scheduling: rulesForm, ratio: ratioForm, ratio_overrides: ratioOverrides } });
+      await api.post("/rules", { rules: { scheduling: rulesForm, ratio: ratioForm, ratio_overrides: ratioOverrides, penalties: penaltyForm } });
       setSavedRules(rulesForm);   // 儲存成功後才更新一鍵生成頁籤顯示的快照
       showToast("✓ 排班規則已儲存");
     } catch (err: any) {
@@ -2662,6 +2665,100 @@ export default function AdminPage() {
                       </div>
                     </div>
                   </div>
+
+                  {/* ── ⚙ 進階調參(懲罰值) — 摺疊預設收起,一般 admin 不用打開 */}
+                  {(() => {
+                    type PenMeta = { key: string; label: string; def: number; min: number; max: number; step?: number; cat: string; tip: string };
+                    const PENALTY_META: PenMeta[] = [
+                      { key:"EXCESS_SWITCH_PENALTY",  label:"多餘換班",       def:1500, min:0, max:20000, cat:"順班",     tip:"S8:輪班超過必要換班數的每次罰。拉高 → 班表更整齊、少換班,代價可能孤立日增加" },
+                      { key:"DIRECT_SWITCH_PENALTY",  label:"沒休就換",       def:500,  min:0, max:20000, cat:"順班",     tip:"S8:沒先排 OFF 就直接切換每次罰(必要/多餘都加)" },
+                      { key:"DIST_PENALTY",           label:"班次比例偏差",   def:900,  min:0, max:20000, cat:"比例/公平", tip:"S10:各護理師 D/E/N 天數偏離設定比例每單位罰" },
+                      { key:"SKILL_SPREAD_PENALTY",   label:"應休縮減公平",   def:400,  min:0, max:20000, cat:"比例/公平", tip:"S6:各護理師縮減幅度差距罰(讓縮減平均分攤)" },
+                      { key:"ISOLATED_WORK_PENALTY",  label:"孤立上班日",     def:750,  min:0, max:20000, cat:"軟規則",   tip:"S9:OFF-上班-OFF 只出來上一天罰" },
+                      { key:"FIX_PENALTY",            label:"固定班偏離",     def:500,  min:0, max:20000, cat:"軟規則",   tip:"S7:固定班偏離其班種每格罰" },
+                      { key:"WEEKLY_OFF_OVER_PENALTY",label:"週OFF凸性",      def:500,  min:0, max:20000, cat:"軟規則",   tip:"S3:全職每週 OFF 超過 2 天罰(凸性 3 層)" },
+                      { key:"HT_ISOLATED_MULT",       label:"半職孤立日倍率", def:2.5,  min:1, max:10,    step:0.1, cat:"軟規則", tip:"半職的孤立上班日 penalty × 倍率(半職工作天少易被排孤立日)" },
+                      { key:"MENTOR_FOLLOW_PENALTY",  label:"新人跟隨導師",   def:5000, min:0, max:20000, cat:"新人",     tip:"新人每天與導師不同班每格罰(要 ≥ EXCESS_SWITCH 才會真的跟)" },
+                      { key:"SMOOTH_SWITCH_MULT",     label:"smooth 換班倍率",def:2,    min:1, max:5,     step:0.1, cat:"版本倍率", tip:"順班優先版的換班懲罰乘倍率(1.5~2.5 為佳)" },
+                      { key:"FAIR_DIST_MULT",         label:"fair 比例倍率",  def:2,    min:1, max:5,     step:0.1, cat:"版本倍率", tip:"公平優先版的比例懲罰乘倍率" },
+                      { key:"MAIN_SOLVE_SECONDS",     label:"求解時限(秒)",   def:90,   min:30,max:600,   cat:"求解器",   tip:"CP-SAT 每個 profile 最多跑幾秒才停(90/180 各有優缺)" },
+                      { key:"MAIN_SOLVE_WORKERS",     label:"求解 CPU 數",    def:4,    min:1, max:16,    cat:"求解器",   tip:"CP-SAT 平行執行緒數(Hobby 給的 vCPU 越多可越大)" },
+                    ];
+                    const PRESET_ALPHA: Record<string, number> = {
+                      EXCESS_SWITCH_PENALTY: 5000,
+                      SMOOTH_SWITCH_MULT: 1.5,
+                      DIST_PENALTY: 500,
+                      MAIN_SOLVE_SECONDS: 180,
+                    };
+                    const cats = Array.from(new Set(PENALTY_META.map(m => m.cat)));
+                    return (
+                      <details style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"10px 14px" }}>
+                        <summary style={{ cursor:"pointer", fontWeight:700, color:"#334155", fontSize:14 }}>
+                          ⚙ 進階調參(懲罰值)　<span style={{ color:"#94a3b8", fontWeight:500, fontSize:12 }}>一般不需調;調完儲存排班規則即生效</span>
+                        </summary>
+                        <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:14 }}>
+                          {/* 預設方案按鈕列 */}
+                          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                            <button className="btn btn-sm" style={{ background:"#2563eb", color:"#fff" }}
+                              onClick={() => setPenaltyForm(PRESET_ALPHA)}>套用 α 方案</button>
+                            <button className="btn btn-sm btn-gray"
+                              onClick={() => setPenaltyForm({})}>全部重置為原廠預設</button>
+                            <span style={{ fontSize:11, color:"#9ca3af", alignSelf:"center", marginLeft:6 }}>
+                              α = EXCESS 5000 / SMOOTH_MULT 1.5 / DIST 500 / SOLVE 180s(順班拉高、fair 比例修 bug)
+                            </span>
+                          </div>
+                          {cats.map(cat => (
+                            <div key={cat}>
+                              <div style={{ fontSize:12, fontWeight:700, color:"#64748b", marginBottom:6, borderBottom:"1px dashed #cbd5e1", paddingBottom:3 }}>
+                                {cat}
+                              </div>
+                              <div style={{ display:"grid", gridTemplateColumns:"1fr 90px 100px auto", gap:8, alignItems:"center", fontSize:13 }}>
+                                {PENALTY_META.filter(m => m.cat === cat).map(m => {
+                                  const v = penaltyForm[m.key];
+                                  return (
+                                    <Fragment key={m.key}>
+                                      <label title={m.tip} style={{ color:"#374151", cursor:"help" }}>
+                                        {m.label}
+                                        <span style={{ fontSize:10, color:"#94a3b8", marginLeft:4 }}>({m.key})</span>
+                                      </label>
+                                      <input
+                                        type="number"
+                                        className="finput finput-sm"
+                                        value={v ?? ""}
+                                        placeholder={String(m.def)}
+                                        min={m.min}
+                                        max={m.max}
+                                        step={m.step ?? 1}
+                                        onChange={e => {
+                                          const s = e.target.value;
+                                          setPenaltyForm(p => {
+                                            if (s === "") { const { [m.key]:_, ...rest } = p; return rest; }
+                                            return { ...p, [m.key]: Number(s) };
+                                          });
+                                        }}
+                                        style={{ textAlign:"right" }}
+                                      />
+                                      <span style={{ fontSize:11, color:"#94a3b8" }}>預設 {m.def}</span>
+                                      <button
+                                        type="button"
+                                        className="btn btn-sm btn-gray"
+                                        style={{ padding:"3px 8px", fontSize:11 }}
+                                        onClick={() => setPenaltyForm(p => { const { [m.key]:_, ...rest } = p; return rest; })}
+                                        title="清除此欄位使用預設值"
+                                      >重置</button>
+                                    </Fragment>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                          <div style={{ fontSize:11, color:"#64748b", background:"#fffbeb", border:"1px solid #fde68a", borderRadius:6, padding:"6px 10px" }}>
+                            💡 空欄位＝用預設值。優先順序:此頁設定 &gt; Railway env &gt; 硬編預設。調完按下方「儲存排班規則」才會生效。
+                          </div>
+                        </div>
+                      </details>
+                    );
+                  })()}
 
                   <button className="btn btn-primary" style={{ alignSelf:"flex-start" }} onClick={saveSchedulingRules}>
                     儲存排班規則

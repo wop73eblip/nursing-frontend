@@ -2648,8 +2648,8 @@ export default function AdminPage() {
                         </div>
                       </label>
 
-                      {/* 規則6/7：連續休假 + 每週上限 */}
-                      <div style={{ display:"flex", gap:20, marginTop:4 }}>
+                      {/* 規則6/7：連續休假 + 每週上限（手機自動變成單欄堆疊,避免 label 換行） */}
+                      <div className="frow" style={{ marginTop:4 }}>
                         <div>
                           <label className="flabel">自動休連續上限（天）</label>
                           <NumInput className="finput" min={1} max={7} value={rulesForm.weekly_max_off_auto}

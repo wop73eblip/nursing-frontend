@@ -2678,6 +2678,9 @@ export default function AdminPage() {
                       { key:"FIX_PENALTY",            label:"固定班偏離",     def:500,  min:0, max:20000, cat:"軟規則",   tip:"S7:固定班偏離其班種每格罰" },
                       { key:"WEEKLY_OFF_OVER_PENALTY",label:"週OFF凸性",      def:500,  min:0, max:20000, cat:"軟規則",   tip:"S3:全職每週 OFF 超過 2 天罰(凸性 3 層)" },
                       { key:"HT_ISOLATED_MULT",       label:"半職孤立日倍率", def:2.5,  min:1, max:10,    step:0.1, cat:"軟規則", tip:"半職的孤立上班日 penalty × 倍率(半職工作天少易被排孤立日)" },
+                      { key:"ISOLATED_MAX_TOTAL",     label:"孤立日總數硬上限",def:0,   min:0, max:100,   cat:"軟規則",   tip:"全體護理師的 OFF-上班-OFF 總數硬上限;0=不限制;設 10 就是全體 ≤10 天" },
+                      { key:"OVER_OFF_PENALTY_HALF",  label:"半職超休罰",     def:500,  min:0, max:20000, cat:"軟規則",   tip:"半職 OFF 天數超過應休 quota 每天罰(通常低於全職,鼓勵 solver 給半職多 OFF)" },
+                      { key:"OVER_OFF_PENALTY_FULL",  label:"全職超休罰",     def:1500, min:0, max:20000, cat:"軟規則",   tip:"全職 OFF 天數超過應休 quota 每天罰(比半職重 → 多餘 OFF 優先給半職填滿)" },
                       { key:"MENTOR_FOLLOW_PENALTY",  label:"新人跟隨導師",   def:5000, min:0, max:20000, cat:"新人",     tip:"新人每天與導師不同班每格罰(要 ≥ EXCESS_SWITCH 才會真的跟)" },
                       { key:"SMOOTH_SWITCH_MULT",     label:"smooth 換班倍率",def:2,    min:1, max:5,     step:0.1, cat:"版本倍率", tip:"順班優先版的換班懲罰乘倍率(1.5~2.5 為佳)" },
                       { key:"FAIR_DIST_MULT",         label:"fair 比例倍率",  def:2,    min:1, max:5,     step:0.1, cat:"版本倍率", tip:"公平優先版的比例懲罰乘倍率" },
@@ -2948,7 +2951,7 @@ export default function AdminPage() {
           ];
           const QUOTA: Row[] = [
             { no:"R1", title:"應休天數公式", desc:"全職 = 8 + 國定假日（最多 13）；半職 = 28 − ⌊(160 − 國定×8)÷2÷8⌋（可上天數捨去）" },
-            { no:"R2", title:"應休下限為軟約束", desc:"人力不足時最多縮減 2 天（每天扣 200，縮減不公另扣 400）；超休每天扣 500" },
+            { no:"R2", title:"應休下限為軟約束", desc:"人力不足時最多縮減 2 天（每天扣 200，縮減不公另扣 400）；超休每天:半職 +500、全職 +1500(讓多餘 OFF 優先給半職填滿)" },
           ];
           const LEAVE: Row[] = [
             { no:"L1", title:"指定休不可覆蓋", desc:"管理員標記的 OFF 不被生成取代" },
@@ -2958,7 +2961,7 @@ export default function AdminPage() {
           ];
           const SOFT: (Row & { penalty?: string })[] = [
             { no:"S1", title:"順班", desc:"只罰「多餘換班」+「沒休就換」；輪班必要換班不罰（見下表）", penalty:"1500 / 500" },
-            { no:"S2", title:"避免孤立上班日", desc:"OFF-上班-OFF（只出來上一天班）", penalty:"+750" },
+            { no:"S2", title:"避免孤立上班日", desc:"OFF-上班-OFF（只出來上一天班）;半職 ×2.5 加重(可設 ISOLATED_MAX_TOTAL 全體硬上限)", penalty:"+750" },
             { no:"S3", title:"固定班偏離", desc:"偏離固定班種每格；並硬性最多 2 格（H10）", penalty:"+500 / 格" },
             { no:"S4", title:"班次比例偏差", desc:"各護理師班次數接近設定比例（±1 天彈性，硬上限 ±2 見 H13）", penalty:"+900 / 單位" },
             { no:"S5", title:"應休縮減公平性", desc:"各護理師縮減幅度差距（配合 R2）", penalty:"+400" },

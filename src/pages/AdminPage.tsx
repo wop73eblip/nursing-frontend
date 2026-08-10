@@ -2681,6 +2681,8 @@ export default function AdminPage() {
                       { key:"ISOLATED_MAX_TOTAL",     label:"孤立日總數硬上限",def:0,   min:0, max:100,   cat:"軟規則",   tip:"全體護理師的 OFF-上班-OFF 總數硬上限;0=不限制;設 10 就是全體 ≤10 天" },
                       { key:"OVER_OFF_PENALTY_HALF",  label:"半職超休罰",     def:500,  min:0, max:20000, cat:"軟規則",   tip:"半職 OFF 天數超過應休 quota 每天罰(通常低於全職,鼓勵 solver 給半職多 OFF)" },
                       { key:"OVER_OFF_PENALTY_FULL",  label:"全職超休罰",     def:1500, min:0, max:20000, cat:"軟規則",   tip:"全職 OFF 天數超過應休 quota 每天罰(比半職重 → 多餘 OFF 優先給半職填滿)" },
+                      { key:"SLACK_PENALTY_HALF",     label:"半職縮減應休罰", def:1000, min:0, max:20000, cat:"軟規則",   tip:"半職使用 off_slack(未達應休)每天罰(拉高 → 強逼給半職滿 OFF,配 OVER_OFF_HALF 低)" },
+                      { key:"SLACK_PENALTY_FULL",     label:"全職縮減應休罰", def:200,  min:0, max:20000, cat:"軟規則",   tip:"全職使用 off_slack(未達應休)每天罰(低於半職是刻意的:如果非要縮就縮全職)" },
                       { key:"MENTOR_FOLLOW_PENALTY",  label:"新人跟隨導師",   def:5000, min:0, max:20000, cat:"新人",     tip:"新人每天與導師不同班每格罰(要 ≥ EXCESS_SWITCH 才會真的跟)" },
                       { key:"SMOOTH_SWITCH_MULT",     label:"smooth 換班倍率",def:2,    min:1, max:5,     step:0.1, cat:"版本倍率", tip:"順班優先版的換班懲罰乘倍率(1.5~2.5 為佳)" },
                       { key:"FAIR_DIST_MULT",         label:"fair 比例倍率",  def:2,    min:1, max:5,     step:0.1, cat:"版本倍率", tip:"公平優先版的比例懲罰乘倍率" },
@@ -2951,7 +2953,7 @@ export default function AdminPage() {
           ];
           const QUOTA: Row[] = [
             { no:"R1", title:"應休天數公式", desc:"全職 = 8 + 國定假日（最多 13）；半職 = 28 − ⌊(160 − 國定×8)÷2÷8⌋（可上天數捨去）" },
-            { no:"R2", title:"應休下限為軟約束", desc:"人力不足時最多縮減 2 天（每天扣 200，縮減不公另扣 400）；超休每天:半職 +500、全職 +1500(讓多餘 OFF 優先給半職填滿)" },
+            { no:"R2", title:"應休下限為軟約束", desc:"人力不足時最多縮減 2 天;縮減每天罰:半職 +1000、全職 +200(強逼填滿半職);超休每天罰:半職 +500、全職 +1500(多餘 OFF 優先給半職);縮減不公另扣 400" },
           ];
           const LEAVE: Row[] = [
             { no:"L1", title:"指定休不可覆蓋", desc:"管理員標記的 OFF 不被生成取代" },

@@ -2177,7 +2177,7 @@ export default function AdminPage() {
                         <label style={{ display:"flex", alignItems:"center", gap:2, fontSize:13, color: curAdminStaff ? "#9ca3af" : "#374151", cursor: curAdminStaff ? "not-allowed" : "pointer", flexShrink:0 }}>
                           <input type="checkbox" checked={curHalftime} disabled={curAdminStaff}
                             onChange={e => setUserEdit(u.uid, { halftime: e.target.checked })}
-                            style={{ width:15, height:15, cursor: curAdminStaff ? "not-allowed" : "pointer" }} />
+                            style={{ width:15, height:15, margin:0, cursor: curAdminStaff ? "not-allowed" : "pointer" }} />
                           半職
                         </label>
                         <label style={{ display:"flex", alignItems:"center", gap:2, fontSize:13, color:"#374151", cursor:"pointer", flexShrink:0 }}>
@@ -2185,7 +2185,7 @@ export default function AdminPage() {
                             onChange={e => setUserEdit(u.uid, e.target.checked
                               ? { admin_staff: true, role: "nurse", level: "member", halftime: false, is_trainee: false, mentor_uid: "" }
                               : { admin_staff: false })}
-                            style={{ width:15, height:15, cursor:"pointer" }} />
+                            style={{ width:15, height:15, margin:0, cursor:"pointer" }} />
                           行政
                         </label>
                         <label style={{ display:"flex", alignItems:"center", gap:2, fontSize:13, color: curAdminStaff ? "#9ca3af" : "#374151", cursor: curAdminStaff ? "not-allowed" : "pointer", flexShrink:0 }}>
@@ -2193,7 +2193,7 @@ export default function AdminPage() {
                             onChange={e => setUserEdit(u.uid, e.target.checked
                               ? { is_trainee: true, role: "nurse" }
                               : { is_trainee: false, mentor_uid: "" })}
-                            style={{ width:15, height:15, cursor: curAdminStaff ? "not-allowed" : "pointer" }} />
+                            style={{ width:15, height:15, margin:0, cursor: curAdminStaff ? "not-allowed" : "pointer" }} />
                           新人
                         </label>
                         {curTrainee && (

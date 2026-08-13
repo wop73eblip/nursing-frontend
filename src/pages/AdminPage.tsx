@@ -2205,7 +2205,7 @@ export default function AdminPage() {
                               ? { mentor_uid: mUid, attr: mentor.attr }
                               : { mentor_uid: mUid });
                           }}
-                            style={{ ...sel, maxWidth: 146, flex:"1 1 100px", minWidth:0 }} title="導師（新人跟隨此人排班；選定後新人 attr 自動跟隨導師）">
+                            style={{ ...sel, maxWidth: 146, flex:"1 1 100px", minWidth:0, WebkitAppearance:"none", appearance:"none", backgroundImage:"none" }} title="導師（新人跟隨此人排班；選定後新人 attr 自動跟隨導師）">
                             <option value="">— 選導師 —</option>
                             {mentorOptions.map(mo => <option key={mo.uid} value={mo.uid}>{mo.name}（{mo.attr}）</option>)}
                           </select>

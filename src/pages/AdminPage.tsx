@@ -2174,13 +2174,13 @@ export default function AdminPage() {
 
                       {/* ── 行 3：☐ 半職 ｜ ☐ 行政 ｜ ☐ 新人 [選導師] — 手機 gap 7px、label 內 2px、選導師 100~140px */}
                       <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:6, flexWrap:"wrap" }}>
-                        <label style={{ display:"flex", alignItems:"center", gap:2, fontSize:13, color: curAdminStaff ? "#9ca3af" : "#374151", cursor: curAdminStaff ? "not-allowed" : "pointer", flexShrink:0 }}>
+                        <label style={{ display:"flex", alignItems:"center", gap:1, fontSize:13, color: curAdminStaff ? "#9ca3af" : "#374151", cursor: curAdminStaff ? "not-allowed" : "pointer", flexShrink:0 }}>
                           <input type="checkbox" checked={curHalftime} disabled={curAdminStaff}
                             onChange={e => setUserEdit(u.uid, { halftime: e.target.checked })}
                             style={{ width:15, height:15, margin:0, cursor: curAdminStaff ? "not-allowed" : "pointer" }} />
                           半職
                         </label>
-                        <label style={{ display:"flex", alignItems:"center", gap:2, fontSize:13, color:"#374151", cursor:"pointer", flexShrink:0 }}>
+                        <label style={{ display:"flex", alignItems:"center", gap:1, fontSize:13, color:"#374151", cursor:"pointer", flexShrink:0 }}>
                           <input type="checkbox" checked={curAdminStaff}
                             onChange={e => setUserEdit(u.uid, e.target.checked
                               ? { admin_staff: true, role: "nurse", level: "member", halftime: false, is_trainee: false, mentor_uid: "" }
@@ -2188,7 +2188,7 @@ export default function AdminPage() {
                             style={{ width:15, height:15, margin:0, cursor:"pointer" }} />
                           行政
                         </label>
-                        <label style={{ display:"flex", alignItems:"center", gap:2, fontSize:13, color: curAdminStaff ? "#9ca3af" : "#374151", cursor: curAdminStaff ? "not-allowed" : "pointer", flexShrink:0 }}>
+                        <label style={{ display:"flex", alignItems:"center", gap:1, fontSize:13, color: curAdminStaff ? "#9ca3af" : "#374151", cursor: curAdminStaff ? "not-allowed" : "pointer", flexShrink:0 }}>
                           <input type="checkbox" checked={curTrainee} disabled={curAdminStaff}
                             onChange={e => setUserEdit(u.uid, e.target.checked
                               ? { is_trainee: true, role: "nurse" }

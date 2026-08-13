@@ -2109,7 +2109,7 @@ export default function AdminPage() {
                       ref={el => { userItemRefs.current[i] = el; }}
                       style={{
                         borderBottom: "1px solid #f3f4f6",
-                        padding: "10px 14px 10px 28px",
+                        padding: "10px 14px",
                         background: isDirty ? "#fffbeb" : undefined,
                         position: "relative",
                       }}

@@ -2172,8 +2172,8 @@ export default function AdminPage() {
                         {!curAdminStaff && attrRatioBadge}
                       </div>
 
-                      {/* ── 行 3：☐ 半職 ｜ ☐ 行政 ｜ ☐ 新人 [選導師] — 手機 gap 8px、label 內 2px、選導師 100~135px */}
-                      <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6, flexWrap:"wrap" }}>
+                      {/* ── 行 3：☐ 半職 ｜ ☐ 行政 ｜ ☐ 新人 [選導師] — 手機 gap 7px、label 內 2px、選導師 100~140px */}
+                      <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:6, flexWrap:"wrap" }}>
                         <label style={{ display:"flex", alignItems:"center", gap:2, fontSize:13, color: curAdminStaff ? "#9ca3af" : "#374151", cursor: curAdminStaff ? "not-allowed" : "pointer", flexShrink:0 }}>
                           <input type="checkbox" checked={curHalftime} disabled={curAdminStaff}
                             onChange={e => setUserEdit(u.uid, { halftime: e.target.checked })}
@@ -2205,7 +2205,7 @@ export default function AdminPage() {
                               ? { mentor_uid: mUid, attr: mentor.attr }
                               : { mentor_uid: mUid });
                           }}
-                            style={{ ...sel, maxWidth: 135, flex:"1 1 100px", minWidth:0 }} title="導師（新人跟隨此人排班；選定後新人 attr 自動跟隨導師）">
+                            style={{ ...sel, maxWidth: 140, flex:"1 1 100px", minWidth:0 }} title="導師（新人跟隨此人排班；選定後新人 attr 自動跟隨導師）">
                             <option value="">— 選導師 —</option>
                             {mentorOptions.map(mo => <option key={mo.uid} value={mo.uid}>{mo.name}（{mo.attr}）</option>)}
                           </select>

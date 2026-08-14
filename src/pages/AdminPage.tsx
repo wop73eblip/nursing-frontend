@@ -2679,7 +2679,8 @@ export default function AdminPage() {
                       { key:"WEEKLY_OFF_OVER_PENALTY",label:"週OFF凸性",      def:500,  min:0, max:20000, cat:"軟規則",   tip:"S3:全職每週 OFF 超過 2 天罰(凸性 3 層)" },
                       { key:"HT_ISOLATED_MULT",       label:"半職孤立日倍率", def:2.5,  min:1, max:10,    step:0.1, cat:"軟規則", tip:"半職的孤立上班日 penalty × 倍率(半職工作天少易被排孤立日)" },
                       { key:"ISOLATED_MAX_TOTAL",     label:"孤立日總數硬上限",def:0,   min:0, max:100,   cat:"軟規則",   tip:"全體護理師的 OFF-上班-OFF 總數硬上限;0=不限制;設 10 就是全體 ≤10 天" },
-                      { key:"ISO_MAX_PER_NURSE",      label:"每人孤立日硬上限",def:1,   min:0, max:10,    cat:"軟規則",   tip:"H17:每位全職護理師整週期的孤立日 ≤ 此值;0=不限制;預設 1(半職除外)" },
+                      { key:"ISO_MAX_PER_NURSE",      label:"全職孤立日硬上限",def:1,   min:0, max:10,    cat:"軟規則",   tip:"H17:每位全職護理師整週期的孤立日 ≤ 此值;0=不限制;預設 1" },
+                      { key:"ISO_MAX_PER_NURSE_HT",   label:"半職孤立日硬上限",def:2,   min:0, max:10,    cat:"軟規則",   tip:"H17:每位半職護理師整週期的孤立日 ≤ 此值;0=不限制;預設 2(密度稀,給多 1 個 buffer)" },
                       { key:"SHORT_BLOCK_PENALTY",    label:"短塊(1-2天)罰",   def:2000, min:0, max:20000, cat:"塊狀",     tip:"S8:同種班連續 1-2 天每塊罰(D/E/N 各自算);全職套用" },
                       { key:"MID_BLOCK_REWARD",       label:"中塊(3-4天)獎勵", def:500,  min:0, max:20000, cat:"塊狀",     tip:"S9:同種班連續 3-4 天每塊獎勵(建模時取負);讓 solver 主動堆中塊" },
                       { key:"LONG_BLOCK_PENALTY",     label:"長塊(≥5天)罰",    def:800,  min:0, max:20000, cat:"塊狀",     tip:"S10:同種班連續 ≥5 天每塊罰(疲勞管理)" },
@@ -2956,7 +2957,7 @@ export default function AdminPage() {
             { no:"H14", title:"行政類上班：視同 D、不計人力", desc:H14_DESC },
             { no:"H15", title:"新人不計臨床人力", desc:"新人=在學習的正式員工：照所有規則排、但 H1/H7/H8 排除。跟隨導師見 S6" },
             { no:"H16", title:"每週期至少一次連續 2 天 OFF", desc:"全職硬規則:週期內至少存在一次「OFF-OFF」（可跨週,如週日→週一 OK;僅不跨週期）；半職不套用。V/員/喪等 LEAVE_ADJUST 天不算入配對。額外獎勵:每多一次連 2 OFF -500（鼓勵 OFF 塊狀化,OFF-OFF-OFF 算 2 對）" },
-            { no:"H17", title:"每人孤立日 ≤ 1", desc:"全職硬規則:每人整週期內「OFF-上班-OFF」孤立上班日最多 1 天；半職不套用（工作天少、密度稀,天然易孤立）。與 S2 軟罰疊加,但硬性擋掉過多" },
+            { no:"H17", title:"每人孤立日 ≤ 1(半職 ≤ 2)", desc:"每人整週期內「OFF-上班-OFF」孤立上班日硬上限。全職 ≤ 1，半職 ≤ 2（工作天少、密度稀,給多 1 個 buffer）。與 S2 軟罰疊加，硬性擋掉過多" },
           ];
           const QUOTA: Row[] = [
             { no:"R1", title:"應休天數公式", desc:"全職 = 8 + 國定假日（最多 13）；半職 = 28 − ⌊(160 − 國定×8)÷2÷8⌋（可上天數捨去）" },

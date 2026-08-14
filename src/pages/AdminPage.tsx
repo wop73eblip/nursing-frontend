@@ -480,7 +480,7 @@ export default function AdminPage() {
     warnings: string[];
     anomalies: string[];
     prefill_warnings: string[];
-    metrics: { switches: number; excess_switches?: number; isolated_days: number; max_ratio_dev: number } | null;
+    metrics: { switches: number; excess_switches?: number; isolated_days: number; max_ratio_dev: number; objective_value?: number|null; best_bound?: number|null; solver_status?: string; solver_wall_time?: number } | null;
     error?: string;
   };
   const [genVersions, setGenVersions] = useState<Partial<Record<GenProfileKey, GenVersion>>>({});
@@ -3710,6 +3710,23 @@ export default function AdminPage() {
                                   <div>多餘換班：<b>{v.metrics?.excess_switches ?? "—"}</b>（總換班 {v.metrics?.switches ?? "—"}，已扣必要）</div>
                                   <div>孤立上班日：<b>{v.metrics?.isolated_days ?? "—"}</b></div>
                                   <div>最大比例偏差：<b>{v.metrics?.max_ratio_dev ?? "—"}</b> 天</div>
+                                  {v.metrics?.objective_value != null && (() => {
+                                    const obj = v.metrics.objective_value;
+                                    const bnd = v.metrics.best_bound ?? 0;
+                                    const gap = obj !== 0 ? Math.abs((obj - bnd) / obj * 100) : 0;
+                                    const status = v.metrics.solver_status ?? "";
+                                    const gapColor = gap < 10 ? "#16a34a" : gap < 30 ? "#d97706" : "#dc2626";
+                                    const gapLabel = gap < 10 ? "接近最佳" : gap < 30 ? "尚可" : "卡 local minima";
+                                    return (
+                                      <div style={{ marginTop:4, paddingTop:6, borderTop:"1px dashed #e5e7eb", fontSize:11.5, color:"#6b7280" }}>
+                                        分數:<b style={{color:"#374151"}}>{obj.toLocaleString()}</b>　下限:{bnd.toLocaleString()}
+                                        <span style={{color:gapColor,fontWeight:700}}>gap {gap.toFixed(1)}%</span>（{gapLabel}）
+                                        {status && status !== "OPTIMAL" && status !== "FEASIBLE" && (
+                                          <span style={{color:"#dc2626",marginLeft:6}}>[{status}]</span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
                                   {(v.warnings.length + v.anomalies.length + v.prefill_warnings.length) > 0 && (() => {
                                     const allWarns = [...v.prefill_warnings, ...v.warnings, ...v.anomalies];
                                     const open = !!warnOpen[p.key];

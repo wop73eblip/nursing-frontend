@@ -2679,6 +2679,11 @@ export default function AdminPage() {
                       { key:"WEEKLY_OFF_OVER_PENALTY",label:"週OFF凸性",      def:500,  min:0, max:20000, cat:"軟規則",   tip:"S3:全職每週 OFF 超過 2 天罰(凸性 3 層)" },
                       { key:"HT_ISOLATED_MULT",       label:"半職孤立日倍率", def:2.5,  min:1, max:10,    step:0.1, cat:"軟規則", tip:"半職的孤立上班日 penalty × 倍率(半職工作天少易被排孤立日)" },
                       { key:"ISOLATED_MAX_TOTAL",     label:"孤立日總數硬上限",def:0,   min:0, max:100,   cat:"軟規則",   tip:"全體護理師的 OFF-上班-OFF 總數硬上限;0=不限制;設 10 就是全體 ≤10 天" },
+                      { key:"ISO_MAX_PER_NURSE",      label:"每人孤立日硬上限",def:1,   min:0, max:10,    cat:"軟規則",   tip:"H17:每位全職護理師整週期的孤立日 ≤ 此值;0=不限制;預設 1(半職除外)" },
+                      { key:"SHORT_BLOCK_PENALTY",    label:"短塊(1-2天)罰",   def:2000, min:0, max:20000, cat:"塊狀",     tip:"S8:同種班連續 1-2 天每塊罰(D/E/N 各自算);全職套用" },
+                      { key:"MID_BLOCK_REWARD",       label:"中塊(3-4天)獎勵", def:500,  min:0, max:20000, cat:"塊狀",     tip:"S9:同種班連續 3-4 天每塊獎勵(建模時取負);讓 solver 主動堆中塊" },
+                      { key:"LONG_BLOCK_PENALTY",     label:"長塊(≥5天)罰",    def:800,  min:0, max:20000, cat:"塊狀",     tip:"S10:同種班連續 ≥5 天每塊罰(疲勞管理)" },
+                      { key:"TWO_OFF_EXTRA_REWARD",   label:"多連2OFF獎勵",    def:500,  min:0, max:20000, cat:"塊狀",     tip:"H16 額外:每多一次連續 2 天 OFF pair 獎勵(OFF-OFF-OFF 算 2 對,鼓勵 OFF 塊狀化)" },
                       { key:"OVER_OFF_PENALTY_HALF",  label:"半職超休罰",     def:500,  min:0, max:20000, cat:"軟規則",   tip:"半職 OFF 天數超過應休 quota 每天罰(通常低於全職,鼓勵 solver 給半職多 OFF)" },
                       { key:"OVER_OFF_PENALTY_FULL",  label:"全職超休罰",     def:1500, min:0, max:20000, cat:"軟規則",   tip:"全職 OFF 天數超過應休 quota 每天罰(比半職重 → 多餘 OFF 優先給半職填滿)" },
                       { key:"SLACK_PENALTY_HALF",     label:"半職縮減應休罰", def:1000, min:0, max:20000, cat:"軟規則",   tip:"半職使用 off_slack(未達應休)每天罰(拉高 → 強逼給半職滿 OFF,配 OVER_OFF_HALF 低)" },
@@ -2950,7 +2955,8 @@ export default function AdminPage() {
             { no:"H13", title:"班次比例硬上限 ±2 天", desc:"各班種天數偏離理想比例最多 ±2 天（例 10:10 極限 8:12，不會 7:13）。全職半職皆同" },
             { no:"H14", title:"行政類上班：視同 D、不計人力", desc:H14_DESC },
             { no:"H15", title:"新人不計臨床人力", desc:"新人=在學習的正式員工：照所有規則排、但 H1/H7/H8 排除。跟隨導師見 S6" },
-            { no:"H16", title:"每週期至少一次連續 2 天 OFF", desc:"全職硬規則:週期內至少存在一次「OFF-OFF」（可跨週,如週日→週一 OK;僅不跨週期）；半職不套用。V/員/喪等 LEAVE_ADJUST 天不算入配對" },
+            { no:"H16", title:"每週期至少一次連續 2 天 OFF", desc:"全職硬規則:週期內至少存在一次「OFF-OFF」（可跨週,如週日→週一 OK;僅不跨週期）；半職不套用。V/員/喪等 LEAVE_ADJUST 天不算入配對。額外獎勵:每多一次連 2 OFF -500（鼓勵 OFF 塊狀化,OFF-OFF-OFF 算 2 對）" },
+            { no:"H17", title:"每人孤立日 ≤ 1", desc:"全職硬規則:每人整週期內「OFF-上班-OFF」孤立上班日最多 1 天；半職不套用（工作天少、密度稀,天然易孤立）。與 S2 軟罰疊加,但硬性擋掉過多" },
           ];
           const QUOTA: Row[] = [
             { no:"R1", title:"應休天數公式", desc:"全職 = 8 + 國定假日（最多 13）；半職 = 28 − ⌊(160 − 國定×8)÷2÷8⌋（可上天數捨去）" },
@@ -2964,12 +2970,15 @@ export default function AdminPage() {
           ];
           const SOFT: (Row & { penalty?: string })[] = [
             { no:"S1", title:"順班", desc:"只罰「多餘換班」+「沒休就換」；輪班必要換班不罰（見下表）", penalty:"1500 / 500" },
-            { no:"S2", title:"避免孤立上班日", desc:"OFF-上班-OFF（只出來上一天班）;半職 ×2.5 加重(可設 ISOLATED_MAX_TOTAL 全體硬上限)", penalty:"+750" },
+            { no:"S2", title:"避免孤立上班日", desc:"OFF-上班-OFF（只出來上一天班）;半職 ×2.5 加重。全職硬上限 ≤1/人（見 H17）；仍保留軟罰疊加", penalty:"+750" },
             { no:"S3", title:"固定班偏離", desc:"偏離固定班種每格；並硬性最多 2 格（H10）", penalty:"+500 / 格" },
             { no:"S4", title:"班次比例偏差", desc:"各護理師班次數接近設定比例（±1 天彈性，硬上限 ±2 見 H13）", penalty:"+900 / 單位" },
             { no:"S5", title:"應休縮減公平性", desc:"各護理師縮減幅度差距（配合 R2）", penalty:"+400" },
             { no:"S6", title:"新人跟隨導師", desc:"新人每天與導師不同班每格扣分；懲罰值高於 S1/S4，確保跟得住。遇新人自己請假可彈性偏離", penalty:"+3000 / 天" },
             { no:"S7", title:"每週標準休超額（凸性）", desc:"全職每週 OFF 超過 2 天就扣分（配合 H6 逼收斂為剛好 2）。3 層門檻遞增，逼多餘休假平均攤開。半職不套用", penalty:"+500 × 3 層" },
+            { no:"S8", title:"短塊懲罰（塊狀化）", desc:"同種上班班（D/E/N 各自）連續 1-2 天算「短塊」，每個罰 2000。目的：避免 D-OFF-D-OFF-D 這種碎片。全職套用；OFF/半/V/員/喪等會斷開塊", penalty:"+2000 / 塊" },
+            { no:"S9", title:"中塊獎勵（甜蜜區）", desc:"同種班連續 3-4 天算「中塊」，每個獎勵 -500（負罰）。solver 會主動堆中塊而非只是「避免短塊」的副作用", penalty:"-500 / 塊" },
+            { no:"S10", title:"長塊懲罰（疲勞管理）", desc:"同種班連續 ≥5 天算「長塊」，每個罰 800。避免連上太久疲勞（H9 連上限預設 5 天已硬擋更長）", penalty:"+800 / 塊" },
           ];
           // 前端硬擋：不進 CP-SAT，在護理師預班階段就擋住
           const FRONT: Row[] = [

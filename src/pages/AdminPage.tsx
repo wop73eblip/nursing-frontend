@@ -2696,6 +2696,10 @@ export default function AdminPage() {
                       { key:"FAIR_DIST_MULT",         label:"fair 比例倍率",  def:2,    min:1, max:5,     step:0.1, cat:"版本倍率", tip:"公平優先版的比例懲罰乘倍率" },
                       { key:"MAIN_SOLVE_SECONDS",     label:"求解時限(秒)",   def:90,   min:30,max:600,   cat:"求解器",   tip:"CP-SAT 每個 profile 最多跑幾秒才停(90/180 各有優缺)" },
                       { key:"MAIN_SOLVE_WORKERS",     label:"求解 CPU 數",    def:4,    min:1, max:16,    cat:"求解器",   tip:"CP-SAT 平行執行緒數(Hobby 給的 vCPU 越多可越大)" },
+                      { key:"LOCAL_RESOLVE_ENABLED",  label:"局部re-solve開關",def:1,   min:0, max:1,     cat:"求解器",   tip:"主 solve 後 gap > 閾值時,挑分數最高的護理師固定其他人再 solve,突破 local minima;0=關閉,1=啟用" },
+                      { key:"LOCAL_RESOLVE_SECONDS",  label:"局部re-solve時限",def:60,  min:10,max:600,   cat:"求解器",   tip:"局部 re-solve 最多跑幾秒" },
+                      { key:"LOCAL_RESOLVE_HOTSPOTS", label:"熱點護理師人數",  def:3,   min:1, max:10,    cat:"求解器",   tip:"每次局部 re-solve 挑分數最高的 N 位護理師 optimize,其他人固定當前解" },
+                      { key:"LOCAL_RESOLVE_MIN_GAP",  label:"觸發gap閾值(%)", def:20,  min:0, max:200,   cat:"求解器",   tip:"主 solve 完成後 gap 超過此值才啟動局部 re-solve;過低會頻繁觸發浪費時間" },
                     ];
                     const PRESET_ALPHA: Record<string, number> = {
                       EXCESS_SWITCH_PENALTY: 5000,

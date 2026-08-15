@@ -2962,12 +2962,12 @@ export default function AdminPage() {
             { no:"H13", title:"班次比例硬上限 ±2 天", desc:"各班種天數偏離理想比例最多 ±2 天（例 10:10 極限 8:12，不會 7:13）。全職半職皆同" },
             { no:"H14", title:"行政類上班：視同 D、不計人力", desc:H14_DESC },
             { no:"H15", title:"新人不計臨床人力", desc:"新人=在學習的正式員工：照所有規則排、但 H1/H7/H8 排除。跟隨導師見 S6" },
-            { no:"H16", title:"每週期至少一次連續 2 天 OFF", desc:"全職硬規則:週期內至少存在一次「OFF-OFF」（可跨週,如週日→週一 OK;僅不跨週期）；半職不套用。V/員/喪等 LEAVE_ADJUST 天不算入配對。額外獎勵:每多一次連 2 OFF -500（鼓勵 OFF 塊狀化,OFF-OFF-OFF 算 2 對）" },
-            { no:"H17", title:"每人孤立日 ≤ 1(半職 ≤ 2)", desc:"每人整週期內「OFF-上班-OFF」孤立上班日硬上限。全職 ≤ 1，半職 ≤ 2（工作天少、密度稀,給多 1 個 buffer）。與 S2 軟罰疊加，硬性擋掉過多" },
+            { no:"H16", title:"每週期至少一次連續 2 天 OFF", desc:`全職硬規則:週期內至少存在一次「OFF-OFF」(可跨週,如週日→週一 OK;僅不跨週期);半職不套用。V/員/喪等 LEAVE_ADJUST 天不算入配對。額外獎勵:每多一次連 2 OFF -${Number(penaltyForm["TWO_OFF_EXTRA_REWARD"] ?? 500)}(鼓勵 OFF 塊狀化,OFF-OFF-OFF 算 2 對)` },
+            { no:"H17", title:`每人孤立日硬上限(全職 ≤${Number(penaltyForm["ISO_MAX_PER_NURSE"] ?? 1)}、半職 ≤${Number(penaltyForm["ISO_MAX_PER_NURSE_HT"] ?? 2)})`, desc:`每人整週期內「OFF-上班-OFF」孤立上班日硬上限。半職給多 buffer(工作天少、密度稀)。與 S2 軟罰疊加,硬性擋掉過多` },
           ];
           const QUOTA: Row[] = [
             { no:"R1", title:"應休天數公式", desc:"全職 = 8 + 國定假日（最多 13）；半職 = 28 − ⌊(160 − 國定×8)÷2÷8⌋（可上天數捨去）" },
-            { no:"R2", title:"應休下限為軟約束", desc:"人力不足時最多縮減 2 天;縮減每天罰:半職 +1000、全職 +200(強逼填滿半職);超休每天罰:半職 +500、全職 +1500(多餘 OFF 優先給半職);縮減不公另扣 400" },
+            { no:"R2", title:"應休下限為軟約束", desc:`人力不足時最多縮減 2 天;縮減每天罰:半職 +${Number(penaltyForm["SLACK_PENALTY_HALF"] ?? 1000)}、全職 +${Number(penaltyForm["SLACK_PENALTY_FULL"] ?? 200)}(強逼填滿半職);超休每天罰:半職 +${Number(penaltyForm["OVER_OFF_PENALTY_HALF"] ?? 500)}、全職 +${Number(penaltyForm["OVER_OFF_PENALTY_FULL"] ?? 1500)}(多餘 OFF 優先給半職);縮減不公另扣 ${Number(penaltyForm["SKILL_SPREAD_PENALTY"] ?? 400)}` },
           ];
           const LEAVE: Row[] = [
             { no:"L1", title:"指定休不可覆蓋", desc:"管理員標記的 OFF 不被生成取代" },
@@ -2975,18 +2975,34 @@ export default function AdminPage() {
             { no:"L3", title:"自動休連續上限 N 天", desc:"系統排的休假不超過 N 天連休（指定休可切斷、放假/調整類也自動中斷；半職不受限）" },
             { no:"L4", title:"連續 OFF 總上限", desc:"指定休+自動休合計連休不得超過設定值（放假/調整類自動中斷；半職不受限）" },
           ];
+          // 動態讀取當下懲罰值(進階調參 penaltyForm > default);與 [main.py:pen()] 對應
+          const P = (key: string, def: number) => Number(penaltyForm[key] ?? def);
+          const _excess = P("EXCESS_SWITCH_PENALTY", 1500);
+          const _direct = P("DIRECT_SWITCH_PENALTY", 500);
+          const _rev = P("REVERSE_SWITCH_PENALTY", 500);
+          const _iso = P("ISOLATED_WORK_PENALTY", 750);
+          const _isoHt = P("HT_ISOLATED_MULT", 2.5);
+          const _fix = P("FIX_PENALTY", 500);
+          const _dist = P("DIST_PENALTY", 900);
+          const _skSpread = P("SKILL_SPREAD_PENALTY", 400);
+          const _mentor = P("MENTOR_FOLLOW_PENALTY", 5000);
+          const _weeklyOff = P("WEEKLY_OFF_OVER_PENALTY", 500);
+          const _shortBlk = P("SHORT_BLOCK_PENALTY", 2000);
+          const _midRew = P("MID_BLOCK_REWARD", 500);
+          const _longBlk = P("LONG_BLOCK_PENALTY", 800);
+          const _seg = P("SEGMENT_PENALTY", 3000);
           const SOFT: (Row & { penalty?: string })[] = [
-            { no:"S1", title:"順班", desc:"只罰「多餘換班」+「沒休就換」+「反向班換班」（E→D、N→E、N→D 即使合法隔OFF 也額外罰）；輪班必要換班不罰。順班優先版(smooth)全部乘 SWITCH_MULT(預設 1.5),搭配 S8/S9/S10/S11 同步加乘" },
-            { no:"S2", title:"避免孤立上班日", desc:"OFF-上班-OFF（只出來上一天班）;半職 ×2.5 加重。全職硬上限 ≤1/人（見 H17）；仍保留軟罰疊加", penalty:"+750" },
-            { no:"S3", title:"固定班偏離", desc:"偏離固定班種每格；並硬性最多 2 格（H10）", penalty:"+500 / 格" },
-            { no:"S4", title:"班次比例偏差", desc:"各護理師班次數接近設定比例（±1 天彈性，硬上限 ±2 見 H13）", penalty:"+900 / 單位" },
-            { no:"S5", title:"應休縮減公平性", desc:"各護理師縮減幅度差距（配合 R2）", penalty:"+400" },
-            { no:"S6", title:"新人跟隨導師", desc:"新人每天與導師不同班每格扣分；懲罰值高於 S1/S4，確保跟得住。遇新人自己請假可彈性偏離", penalty:"+3000 / 天" },
-            { no:"S7", title:"每週標準休超額（凸性）", desc:"全職每週 OFF 超過 2 天就扣分（配合 H6 逼收斂為剛好 2）。3 層門檻遞增，逼多餘休假平均攤開。半職不套用", penalty:"+500 × 3 層" },
-            { no:"S8", title:"短塊懲罰（塊狀化,階梯）", desc:"同種上班班（D/E/N 各自）連續 1-2 天算「短塊」，階梯罰:1 天塊罰 懲罰值 × 2、2 天塊罰 懲罰值 × 1（越短越痛,solver 優先消滅 1 天塊）。全職套用；OFF/半/V/員/喪等會斷開塊", penalty:"1天×2 / 2天×1" },
-            { no:"S9", title:"中塊獎勵（甜蜜區）", desc:"同種班連續 3-4 天算「中塊」，每個獎勵 -500（負罰）。solver 會主動堆中塊而非只是「避免短塊」的副作用", penalty:"-500 / 塊" },
-            { no:"S10", title:"長塊懲罰（疲勞管理）", desc:"同種班連續 ≥5 天算「長塊」，每個罰 800。避免連上太久疲勞（H9 連上限預設 5 天已硬擋更長）", penalty:"+800 / 塊" },
-            { no:"S11", title:"班種段數集中", desc:"每人每種班 D/E/N 各自的「段數」超過 1 段就罰。段的定義:只看真正上班的工作日順序(OFF/半/V/員/喪 全部穿透),換到不同班種才算新段。例:D D OFF D D = 1 段 D;D E D = 2 段 D + 1 段 E。目的:讓每種班在月內集中在一段(手排精神:先排完 D 再排 E 再排 N)", penalty:"+3000 / 多餘段" },
+            { no:"S1", title:"順班", desc:`只罰「多餘換班」(+${_excess})+「沒休就換」(+${_direct})+「反向班換班」(+${_rev},E→D、N→E、N→D 即使合法隔OFF 也罰);輪班必要換班不罰。順班優先版(smooth)全部乘 SWITCH_MULT(預設 1.5),搭配 S8/S9/S10/S11 同步加乘` },
+            { no:"S2", title:"避免孤立上班日", desc:`OFF-上班-OFF(只出來上一天班);半職 ×${_isoHt} 加重。全職硬上限 ≤1/人(見 H17);仍保留軟罰疊加`, penalty:`+${_iso}` },
+            { no:"S3", title:"固定班偏離", desc:"偏離固定班種每格;並硬性最多 2 格(H10)", penalty:`+${_fix} / 格` },
+            { no:"S4", title:"班次比例偏差", desc:"各護理師班次數偏離設定比例(±(ra+rb-1)甜蜜區,硬上限 ±2 見 H13);對每對班種各罰", penalty:`+${_dist} / 單位` },
+            { no:"S5", title:"應休縮減公平性", desc:"各護理師縮減幅度差距(配合 R2)", penalty:`+${_skSpread}` },
+            { no:"S6", title:"新人跟隨導師", desc:"新人每天與導師不同班每格扣分;懲罰值高於 S1/S4,確保跟得住。遇新人自己請假可彈性偏離", penalty:`+${_mentor} / 天` },
+            { no:"S7", title:"每週標準休超額(凸性)", desc:"全職每週 OFF 超過 2 天就扣分(配合 H6 逼收斂為剛好 2)。3 層門檻遞增,逼多餘休假平均攤開。半職不套用", penalty:`+${_weeklyOff} × 3 層` },
+            { no:"S8", title:"短塊懲罰(塊狀化,階梯)", desc:"同種上班班(D/E/N 各自)連續 1-2 天算「短塊」,階梯罰:1 天塊罰 × 2、2 天塊罰 × 1(越短越痛,solver 優先消滅 1 天塊)。全職套用;OFF/半/V/員/喪等會斷開塊", penalty:`1天+${_shortBlk*2} / 2天+${_shortBlk}` },
+            { no:"S9", title:"中塊獎勵(甜蜜區)", desc:"同種班連續 3-4 天算「中塊」,每個獎勵(負罰)。solver 會主動堆中塊而非只是「避免短塊」的副作用", penalty:`-${_midRew} / 塊` },
+            { no:"S10", title:"長塊懲罰(疲勞管理)", desc:"同種班連續 ≥5 天算「長塊」。避免連上太久疲勞(H9 連上限預設 5 天已硬擋更長)", penalty:`+${_longBlk} / 塊` },
+            { no:"S11", title:"班種段數集中", desc:"每人每種班 D/E/N 各自的「段數」超過 1 段就罰。段的定義:只看真正上班的工作日順序(OFF/半/V/員/喪 全部穿透),換到不同班種才算新段。例:D D OFF D D = 1 段 D;D E D = 2 段 D + 1 段 E。目的:讓每種班在月內集中在一段(手排精神:先排完 D 再排 E 再排 N)", penalty:`+${_seg} / 多餘段` },
           ];
           // 前端硬擋：不進 CP-SAT，在護理師預班階段就擋住
           const FRONT: Row[] = [
@@ -3127,7 +3143,7 @@ export default function AdminPage() {
               </div>
               <div style={{ fontSize:11.5, color:"#78350f", marginTop:8, lineHeight:1.7 }}>
                 段的定義:同種上班班連續(OFF/半/V/員/喪/延休/補休/調移 全部穿透),換到不同班種才算新段。<br/>
-                罰值公式:Σ 每個班種 max(0, 段數 − 1) × SEGMENT_PENALTY(現值 6000)。順班優先版另乘 SWITCH_MULT(1.5)。
+                罰值公式:Σ 每個班種 max(0, 段數 − 1) × SEGMENT_PENALTY(現值 {_seg})。順班優先版另乘 SWITCH_MULT(1.5)。
               </div>
             </div>
           );

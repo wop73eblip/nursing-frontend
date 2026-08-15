@@ -480,7 +480,7 @@ export default function AdminPage() {
     warnings: string[];
     anomalies: string[];
     prefill_warnings: string[];
-    metrics: { switches: number; excess_switches?: number; isolated_days: number; max_ratio_dev: number; objective_value?: number|null; best_bound?: number|null; solver_status?: string; solver_wall_time?: number } | null;
+    metrics: { switches: number; excess_switches?: number; isolated_days: number; max_ratio_dev: number; objective_value?: number|null; best_bound?: number|null; solver_status?: string; solver_wall_time?: number; person_quality?: Record<string, number> } | null;
     error?: string;
   };
   const [genVersions, setGenVersions] = useState<Partial<Record<GenProfileKey, GenVersion>>>({});
@@ -488,6 +488,7 @@ export default function AdminPage() {
   const [lastGenSchedules, setLastGenSchedules] = useState<Partial<Record<GenProfileKey, Record<string, Record<string, string>>>>>({});
   const [selectedProfile, setSelectedProfile] = useState<GenProfileKey | null>(null);
   const [warnOpen, setWarnOpen] = useState<Record<string, boolean>>({});   // 版本卡「警告」展開狀態
+  const [pqOpen, setPqOpen] = useState<Record<string, boolean>>({});         // 版本卡「品質分數」展開狀態
   const [committing, setCommitting] = useState(false);
   const [commitResult, setCommitResult] = useState<string>("");
 
@@ -3766,6 +3767,42 @@ export default function AdminPage() {
                                         <span style={{color:gapColor,fontWeight:700}}>gap {gap.toFixed(1)}%</span>（{gapLabel}）
                                         {status && status !== "OPTIMAL" && status !== "FEASIBLE" && (
                                           <span style={{color:"#dc2626",marginLeft:6}}>[{status}]</span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                  {v.metrics?.person_quality && Object.keys(v.metrics.person_quality).length > 0 && (() => {
+                                    const sorted = Object.entries(v.metrics.person_quality).sort((a,b) => b[1] - a[1]);
+                                    const top2 = sorted.slice(0, 2);
+                                    const open = !!pqOpen[p.key];
+                                    const pqColor = (s:number) => s > 50000 ? "#dc2626" : s > 20000 ? "#d97706" : "#16a34a";
+                                    return (
+                                      <div style={{ marginTop:2, fontSize:11.5, color:"#6b7280" }}>
+                                        <div
+                                          onClick={() => setPqOpen(o => ({ ...o, [p.key]: !o[p.key] }))}
+                                          style={{ cursor:"pointer", userSelect:"none" }}
+                                        >
+                                          <span style={{ color:"#3730a3", fontWeight:700 }}>{open ? "▾" : "▸"} 品質分數</span>
+                                          {top2.map(([nm, sc]) => (
+                                            <span key={nm} style={{ marginRight:6, color: pqColor(sc) }}>
+                                              {nm}({sc.toLocaleString()})
+                                            </span>
+                                          ))}
+                                        </div>
+                                        {open && (
+                                          <div style={{ marginTop:4, paddingLeft:12, display:"grid", gridTemplateColumns:"auto 1fr auto", rowGap:2, columnGap:8, fontSize:11.5 }}>
+                                            {sorted.map(([nm, sc]) => (
+                                              <Fragment key={nm}>
+                                                <span style={{ color:"#6b7280" }}>{nm}</span>
+                                                <span style={{ height:10, background:"#f3f4f6", borderRadius:2, marginTop:3, overflow:"hidden" }}>
+                                                  <span style={{ display:"block", height:"100%", width:`${Math.min(100, sc / (sorted[0][1]||1) * 100)}%`, background: pqColor(sc) }} />
+                                                </span>
+                                                <span style={{ color: pqColor(sc), fontWeight:600, textAlign:"right", minWidth:60 }}>
+                                                  {sc.toLocaleString()}
+                                                </span>
+                                              </Fragment>
+                                            ))}
+                                          </div>
                                         )}
                                       </div>
                                     );

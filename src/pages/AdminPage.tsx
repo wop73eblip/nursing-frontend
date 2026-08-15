@@ -480,7 +480,7 @@ export default function AdminPage() {
     warnings: string[];
     anomalies: string[];
     prefill_warnings: string[];
-    metrics: { switches: number; excess_switches?: number; isolated_days: number; max_ratio_dev: number; objective_value?: number|null; best_bound?: number|null; solver_status?: string; solver_wall_time?: number; person_quality?: Record<string, number> } | null;
+    metrics: { switches: number; excess_switches?: number; isolated_days: number; max_ratio_dev: number; objective_value?: number|null; best_bound?: number|null; solver_status?: string; solver_wall_time?: number; person_quality?: Record<string, number>; rescued?: boolean } | null;
     error?: string;
   };
   const [genVersions, setGenVersions] = useState<Partial<Record<GenProfileKey, GenVersion>>>({});
@@ -3771,6 +3771,11 @@ export default function AdminPage() {
                                       </div>
                                     );
                                   })()}
+                                  {v.metrics?.rescued && (
+                                    <div style={{ marginTop:4, paddingTop:6, borderTop:"1px dashed #e5e7eb", fontSize:11.5, color:"#dc2626", fontWeight:700 }}>
+                                      ⚠ 救援解(主 solver 逾時,改用可行但未最佳化的班表)
+                                    </div>
+                                  )}
                                   {v.metrics?.person_quality && Object.keys(v.metrics.person_quality).length > 0 && (() => {
                                     const sorted = Object.entries(v.metrics.person_quality).sort((a,b) => b[1] - a[1]);
                                     const top2 = sorted.slice(0, 2);

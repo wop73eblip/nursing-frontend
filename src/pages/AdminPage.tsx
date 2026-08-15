@@ -2976,7 +2976,7 @@ export default function AdminPage() {
             { no:"L4", title:"連續 OFF 總上限", desc:"指定休+自動休合計連休不得超過設定值（放假/調整類自動中斷；半職不受限）" },
           ];
           const SOFT: (Row & { penalty?: string })[] = [
-            { no:"S1", title:"順班", desc:"只罰「多餘換班」+「沒休就換」+「反向班換班」（E→D、N→E、N→D 即使合法隔OFF 也額外罰）；輪班必要換班不罰", penalty:"1500 / 500 / 500" },
+            { no:"S1", title:"順班", desc:"只罰「多餘換班」+「沒休就換」+「反向班換班」（E→D、N→E、N→D 即使合法隔OFF 也額外罰）；輪班必要換班不罰。順班優先版(smooth)全部乘 SWITCH_MULT(預設 1.5),搭配 S8/S9/S10/S11 同步加乘" },
             { no:"S2", title:"避免孤立上班日", desc:"OFF-上班-OFF（只出來上一天班）;半職 ×2.5 加重。全職硬上限 ≤1/人（見 H17）；仍保留軟罰疊加", penalty:"+750" },
             { no:"S3", title:"固定班偏離", desc:"偏離固定班種每格；並硬性最多 2 格（H10）", penalty:"+500 / 格" },
             { no:"S4", title:"班次比例偏差", desc:"各護理師班次數接近設定比例（±1 天彈性，硬上限 ±2 見 H13）", penalty:"+900 / 單位" },
@@ -3079,32 +3079,55 @@ export default function AdminPage() {
             </div>
           );
 
-          const switchTable = (
+          const segmentTable = (
             <div style={{
               margin:"0 18px 16px", padding:"12px 14px",
               background:"#fffbeb", border:"1px solid #fde68a", borderRadius:8,
             }}>
               <div style={{ fontSize:12.5, fontWeight:700, color:"#78350f", marginBottom:8 }}>
-                S1 順班懲罰對照表（每次）
+                S11 班種段數計算說明
               </div>
               <div style={{ overflowX:"auto" }}>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12.5 }}>
                   <thead>
                     <tr style={{ background:"#fef3c7" }}>
-                      <th style={{ padding:"6px 10px", textAlign:"left", color:"#78350f", fontWeight:700 }}>情境</th>
-                      <th style={{ padding:"6px 10px", textAlign:"right", color:"#78350f", fontWeight:700, width:110 }}>懲罰值</th>
+                      <th style={{ padding:"6px 10px", textAlign:"left", color:"#78350f", fontWeight:700, width:90 }}>屬性</th>
+                      <th style={{ padding:"6px 10px", textAlign:"left", color:"#78350f", fontWeight:700 }}>甜蜜區條件(不罰)</th>
+                      <th style={{ padding:"6px 10px", textAlign:"left", color:"#78350f", fontWeight:700 }}>舉例(甜蜜)</th>
+                      <th style={{ padding:"6px 10px", textAlign:"left", color:"#78350f", fontWeight:700 }}>舉例(開始罰)</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr><td style={{ padding:"6px 10px", color:"#374151" }}>必要換班 + 有休</td><td style={{ padding:"6px 10px", textAlign:"right", color:"#059669", fontWeight:700 }}>0</td></tr>
-                    <tr><td style={{ padding:"6px 10px", color:"#374151", borderTop:"1px solid #fde68a" }}>必要換班 + 沒休</td><td style={{ padding:"6px 10px", textAlign:"right", color:"#b45309", fontWeight:700, borderTop:"1px solid #fde68a" }}>+500</td></tr>
-                    <tr><td style={{ padding:"6px 10px", color:"#374151", borderTop:"1px solid #fde68a" }}>多餘換班 + 有休</td><td style={{ padding:"6px 10px", textAlign:"right", color:"#b45309", fontWeight:700, borderTop:"1px solid #fde68a" }}>+1500</td></tr>
-                    <tr><td style={{ padding:"6px 10px", color:"#374151", borderTop:"1px solid #fde68a" }}>多餘換班 + 沒休</td><td style={{ padding:"6px 10px", textAlign:"right", color:"#dc2626", fontWeight:700, borderTop:"1px solid #fde68a" }}>+2000</td></tr>
+                    <tr>
+                      <td style={{ padding:"6px 10px", color:"#374151", fontWeight:700 }}>輪班DE</td>
+                      <td style={{ padding:"6px 10px", color:"#374151" }}>D ≤ 1 段 且 E ≤ 1 段</td>
+                      <td style={{ padding:"6px 10px", color:"#059669" }}>D×10 E×10(2 段) 或 D×20(1 段)</td>
+                      <td style={{ padding:"6px 10px", color:"#dc2626" }}>D×5 E×5 D×5(D 2 段 → 罰 1)</td>
+                    </tr>
+                    <tr style={{ borderTop:"1px solid #fde68a" }}>
+                      <td style={{ padding:"6px 10px", color:"#374151", fontWeight:700 }}>輪班DN</td>
+                      <td style={{ padding:"6px 10px", color:"#374151" }}>D ≤ 1 段 且 N ≤ 1 段</td>
+                      <td style={{ padding:"6px 10px", color:"#059669" }}>D×7 N×13(2 段)</td>
+                      <td style={{ padding:"6px 10px", color:"#dc2626" }}>D×3 N×6 D×4(D 2 段 → 罰 1)</td>
+                    </tr>
+                    <tr style={{ borderTop:"1px solid #fde68a" }}>
+                      <td style={{ padding:"6px 10px", color:"#374151", fontWeight:700 }}>輪班EN</td>
+                      <td style={{ padding:"6px 10px", color:"#374151" }}>E ≤ 1 段 且 N ≤ 1 段</td>
+                      <td style={{ padding:"6px 10px", color:"#059669" }}>同上</td>
+                      <td style={{ padding:"6px 10px", color:"#dc2626" }}>同上</td>
+                    </tr>
+                    <tr style={{ borderTop:"1px solid #fde68a" }}>
+                      <td style={{ padding:"6px 10px", color:"#374151", fontWeight:700 }}>輪班DEN</td>
+                      <td style={{ padding:"6px 10px", color:"#374151" }}>D ≤ 1 段 且 E ≤ 1 段 且 N ≤ 1 段</td>
+                      <td style={{ padding:"6px 10px", color:"#059669" }}>D×5 E×5 N×5(3 段)</td>
+                      <td style={{ padding:"6px 10px", color:"#dc2626" }}>D×3 E×5 N×5 D×2(D 2 段 → 罰 1)</td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
               <div style={{ fontSize:11.5, color:"#78350f", marginTop:8, lineHeight:1.7 }}>
-                必要換班數 = 班種數 − 1（固定班 0、2 種班 1、DEN 3 種 2 次）。輪班本來就必須換的次數不罰。
+                段的定義:同種上班班連續(OFF/半/V/員/喪/延休/補休/調移 全部穿透),換到不同班種才算新段。<br/>
+                罰值公式:Σ 每個班種 max(0, 段數 − 1) × SEGMENT_PENALTY(現值 6000)。順班優先版另乘 SWITCH_MULT(1.5)。
               </div>
             </div>
           );
@@ -3123,7 +3146,7 @@ export default function AdminPage() {
               {sectionCard("hard",  "硬規則",   "違反即生成失敗（會提示衝突原因）", HARD)}
               {sectionCard("quota", "應休天數", "計算公式與縮減上限", QUOTA)}
               {sectionCard("leave", "休假規則", "OFF 鎖定與連休上限", LEAVE)}
-              {sectionCard("soft",  "軟規則",   "人力允許時盡量遵守；每項有懲罰值", SOFT, switchTable)}
+              {sectionCard("soft",  "軟規則",   "人力允許時盡量遵守；每項有懲罰值", SOFT, segmentTable)}
               {sectionCard("front", "前端硬擋", "護理師預班階段擋住，不進 CP-SAT；自動排班不受此限", FRONT)}
 
               {/* 可設定參數區（chip 樣式） */}

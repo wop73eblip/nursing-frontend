@@ -489,6 +489,8 @@ export default function AdminPage() {
   const [selectedProfile, setSelectedProfile] = useState<GenProfileKey | null>(null);
   const [warnOpen, setWarnOpen] = useState<Record<string, boolean>>({});   // 版本卡「警告」展開狀態
   const [pqOpen, setPqOpen] = useState<Record<string, boolean>>({});         // 版本卡「品質分數」展開狀態
+  const [cgResult, setCgResult] = useState<any>(null);                        // CG 排班結果(superadmin only)
+  const [cgRunning, setCgRunning] = useState(false);
   const [committing, setCommitting] = useState(false);
   const [commitResult, setCommitResult] = useState<string>("");
 
@@ -3700,6 +3702,7 @@ export default function AdminPage() {
                       </div>
                     </div>
                   ) : (
+                    <>
                     <button
                       className="btn btn-primary"
                       style={{ alignSelf:"flex-start" }}
@@ -3707,6 +3710,85 @@ export default function AdminPage() {
                       onClick={() => setConfirmGenerate(true)}>
                       一鍵生成排班
                     </button>
+                    {isSuperAdmin && dCycleIsSet && (
+                      <div style={{ marginTop:16, padding:"12px 14px", background:"#fef3c7", border:"1px dashed #d97706", borderRadius:8 }}>
+                        <div style={{ fontSize:12.5, fontWeight:700, color:"#78350f", marginBottom:6 }}>
+                          🧪 CG 排班(實驗中,僅超級管理員可見)
+                        </div>
+                        <div style={{ fontSize:11, color:"#92400e", marginBottom:8, lineHeight:1.6 }}>
+                          Column Generation 演算法。對每人 DP 產生塊狀候選,再選一組滿足需求。<br/>
+                          <b>MVP 限制</b>:忽略 leader/second、H4 週 2 種、F1 首週末、H17 iso、H16、S6 新人跟老師;每日需求用軟 slack(可能不精確 ±1-2 人)。<br/>
+                          <b>用途</b>:demo 塊狀效果,結果不建議直接匯入使用。
+                        </div>
+                        <button
+                          className="btn btn-sm"
+                          style={{ background:"#d97706", color:"#fff" }}
+                          disabled={cgRunning}
+                          onClick={async () => {
+                            setCgRunning(true); setCgResult(null);
+                            try {
+                              const res = await api.post(`/schedule/generate-cg?cycle_start=${dCycle.start_date}&cycle_days=${dPeriod}`);
+                              setCgResult(res.data);
+                            } catch (err: any) {
+                              setCgResult({ error: err.response?.data?.detail ?? err.message });
+                            } finally {
+                              setCgRunning(false);
+                            }
+                          }}>
+                          {cgRunning ? "求解中…" : "🧪 執行 CG 排班"}
+                        </button>
+                        {cgResult && !cgResult.error && (
+                          <div style={{ marginTop:12, padding:10, background:"#fff", borderRadius:6, fontSize:12 }}>
+                            <div style={{ fontWeight:700, marginBottom:6 }}>{cgResult.message}</div>
+                            <div style={{ color:"#6b7280", marginBottom:8 }}>
+                              solver:{cgResult.solver_status}  t={cgResult.metrics?.solver_wall_time}s  obj={Math.round(cgResult.metrics?.objective_value || 0).toLocaleString()}
+                            </div>
+                            {(() => {
+                              const dates = cgResult.cycle_dates || [];
+                              const schedules = cgResult.schedules || {};
+                              // 每日 D/E/N 檢查
+                              const daily = dates.map((d:string) => {
+                                let dc=0,ec=0,nc=0;
+                                Object.values(schedules).forEach((sh:any) => {
+                                  const v = sh[d];
+                                  if (v === 'D' || v === '會' || v === '公' || v === '書') dc++;
+                                  else if (v === 'E') ec++;
+                                  else if (v === 'N') nc++;
+                                });
+                                return { d, dc, ec, nc };
+                              });
+                              const badDays = daily.filter((x:any) => x.dc !== 4 || x.ec !== 3 || x.nc !== 3);
+                              return (
+                                <>
+                                  <div style={{ fontSize:11.5, marginBottom:6 }}>
+                                    <b>每日需求偏差</b>:{badDays.length} / {daily.length} 天不精確
+                                  </div>
+                                  {badDays.slice(0,3).map((x:any) => (
+                                    <div key={x.d} style={{ fontSize:10.5, color:"#dc2626" }}>
+                                      {x.d}: D={x.dc}(需4) E={x.ec}(需3) N={x.nc}(需3)
+                                    </div>
+                                  ))}
+                                  <div style={{ marginTop:8, fontSize:11 }}><b>班表(前 6 位)</b>:</div>
+                                  <div style={{ fontFamily:"monospace", fontSize:10.5, whiteSpace:"pre", overflow:"auto", background:"#f9fafb", padding:6, borderRadius:4, marginTop:4 }}>
+                                    {Object.entries(schedules).slice(0,6).map(([uid, sh]: any) => {
+                                      const nm = users.find((u:any) => u.uid === uid)?.name || uid.slice(0,6);
+                                      const seq = dates.map((d:string) => (sh[d] || '.').charAt(0)).join(' ');
+                                      return `${nm.padEnd(6)}: ${seq}`;
+                                    }).join('\n')}
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                        {cgResult && cgResult.error && (
+                          <div style={{ marginTop:12, padding:10, background:"#fee2e2", color:"#dc2626", borderRadius:6, fontSize:12 }}>
+                            ❌ {cgResult.error}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    </>
                   )}
 
                   {/* ── 生成結果 */}

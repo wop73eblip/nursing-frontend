@@ -636,23 +636,49 @@ export default function AdminPage() {
     const shift    = span.dataset.shift;
     if (!nurseUid || !date) return;
 
-    // ── 多選模式:touch 加/減 selection(起始 cell 決定模式)
+    // ── 多選模式:touch 加/減 selection(150ms 長按後進拖曳,短按 = 單擊 toggle)
     if (multiSelectMode) {
       e.stopPropagation();
       const startKey = `${nurseUid}_${date}`;
+      const startTouch = e.touches[0];
+      const startX = startTouch.clientX;
+      const startY = startTouch.clientY;
       // 起始 cell 已選 → 拖曳走 remove 模式;否則 add 模式
       const removeMode = ctrlSelected.has(startKey);
-      multiDragRef.current = { active: true, started: false, removeMode };
       const seenKeys = new Set<string>([startKey]);
-      // 起點:依模式加/減
-      setCtrlSelected(prev => {
-        const next = new Set(prev);
-        if (removeMode) next.delete(startKey); else next.add(startKey);
-        return next;
-      });
+      let entered = false;
+      let cancelled = false;
+
+      // 150ms 長按後進入拖曳:toggle 起始 cell + 震動反饋
+      const timer = setTimeout(() => {
+        if (cancelled) return;
+        entered = true;
+        multiDragRef.current = { active: true, started: false, removeMode };
+        setCtrlSelected(prev => {
+          const next = new Set(prev);
+          if (removeMode) next.delete(startKey); else next.add(startKey);
+          return next;
+        });
+        try { if (navigator.vibrate) navigator.vibrate(25); } catch {}
+      }, 150);
+
       const onMove = (ev: TouchEvent) => {
-        ev.preventDefault();   // 全部 preventDefault 阻止畫面 scroll
         const t = ev.touches[0];
+        if (!entered) {
+          // 未進拖曳:若移動明顯 → cancel(讓使用者知道要從空白處 scroll)
+          const dx = Math.abs(t.clientX - startX);
+          const dy = Math.abs(t.clientY - startY);
+          if (dx > 8 || dy > 8) {
+            cancelled = true;
+            clearTimeout(timer);
+            document.removeEventListener('touchmove', onMove);
+            document.removeEventListener('touchend', onEnd);
+            document.removeEventListener('touchcancel', onEnd);
+          }
+          return;
+        }
+        // 已進拖曳:preventDefault + 加/減
+        ev.preventDefault();
         const el = document.elementFromPoint(t.clientX, t.clientY) as HTMLElement | null;
         if (!el) return;
         const target = (el.dataset?.nurseUid ? el : el.closest("[data-nurse-uid]")) as HTMLElement | null;
@@ -674,7 +700,16 @@ export default function AdminPage() {
         });
       };
       const onEnd = () => {
-        lastTouchTsRef.current = Date.now();   // 標記 touch 結束時間,阻止後續 click 重複 toggle
+        clearTimeout(timer);
+        lastTouchTsRef.current = Date.now();
+        if (!entered && !cancelled) {
+          // 短按(< 150ms 抬起):toggle 起始 cell(單擊)
+          setCtrlSelected(prev => {
+            const next = new Set(prev);
+            if (removeMode) next.delete(startKey); else next.add(startKey);
+            return next;
+          });
+        }
         multiDragRef.current = null;
         document.removeEventListener('touchmove', onMove);
         document.removeEventListener('touchend', onEnd);

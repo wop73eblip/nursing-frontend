@@ -272,9 +272,9 @@ export default function AdminPage() {
   const [shiftAnchor, setShiftAnchor] = useState<{ nurseUid: string; date: string; shift: string } | null>(null);
   const [ctrlSelected, setCtrlSelected] = useState<Set<string>>(new Set()); // "uid_date"
   const [shiftRange, setShiftRange] = useState<Set<string>>(new Set()); // "uid_date" for shift-range highlight
-  const [brushShift, setBrushShift] = useState<string | null>(null);   // 刷子模式:選定的班別(null=關)
-  const [multiSelectMode, setMultiSelectMode] = useState(false);       // 手機多選模式
+  const [multiSelectMode, setMultiSelectMode] = useState(false);       // 多選模式(桌面/手機通用):點=toggle、拖曳=加選
   const [batchFillPopup, setBatchFillPopup] = useState<{ cells: {uid:string;date:string}[] } | null>(null);
+  const multiDragRef = useRef<{ active: boolean; started: boolean } | null>(null);
   const [batchPopup, setBatchPopup] = useState<{ nurseUid: string; nurseName: string; dates: string[] } | null>(null);
   const [dragFill, setDragFill] = useState<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
   const dragFillRef = useRef<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
@@ -589,9 +589,9 @@ export default function AdminPage() {
       window.removeEventListener("resize", measure);
       if (ro) ro.disconnect();
     };
-  }, [tab, schedule, nurseUsers, cycle.start_date, cycle.end_date, ctrlSelected.size, brushShift, multiSelectMode]);
+  }, [tab, schedule, nurseUsers, cycle.start_date, cycle.end_date, ctrlSelected.size, multiSelectMode]);
 
-  // ── 監聽垂直捲動：表頭捲過頁籤列後顯示浮動表頭
+  // ── 監聽垂直捲動：表頭捲過頁籤列後顯示浮動表頭 + 每次 scroll 都 update sticky top
   useEffect(() => {
     const onScroll = () => {
       const row = apTheadRowRef.current;
@@ -599,11 +599,21 @@ export default function AdminPage() {
       if (!row || !tabs) { setApShowStickyHdr(false); return; }
       const threshold = tabs.getBoundingClientRect().bottom;
       setApShowStickyHdr(row.getBoundingClientRect().bottom <= threshold);
+      // scroll 時 tabs.bottom 可能因 sticky 定位變化(工具列 wrap 影響),update top 避免對不齊
+      setApStickyBox(prev => prev.top !== threshold ? { ...prev, top: threshold } : prev);
     };
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, [tab]);
+
+  // ── 桌面多選拖曳:window mouseup 結束
+  useEffect(() => {
+    if (!multiSelectMode) return;
+    const onUp = () => { if (multiDragRef.current) multiDragRef.current.active = false; };
+    window.addEventListener("mouseup", onUp);
+    return () => window.removeEventListener("mouseup", onUp);
+  }, [multiSelectMode]);
 
   // ── 同步水平捲動：表格 → 浮動表頭
   useEffect(() => {
@@ -624,6 +634,50 @@ export default function AdminPage() {
     const date     = span.dataset.date;
     const shift    = span.dataset.shift;
     if (!nurseUid || !date) return;
+
+    // ── 多選模式:touch 加入 selection(拖曳自動加,不 toggle)
+    if (multiSelectMode) {
+      const startKey = `${nurseUid}_${date}`;
+      multiDragRef.current = { active: true, started: false };
+      const seenKeys = new Set<string>([startKey]);
+      // 起點:加入(若已在則移除 - 這是「點擊」語意,拖曳時 started 才會 true)
+      setCtrlSelected(prev => {
+        const next = new Set(prev);
+        if (next.has(startKey)) next.delete(startKey); else next.add(startKey);
+        return next;
+      });
+      const onMove = (ev: TouchEvent) => {
+        const t = ev.touches[0];
+        const el = document.elementFromPoint(t.clientX, t.clientY) as HTMLElement | null;
+        if (!el) return;
+        const target = (el.dataset?.nurseUid ? el : el.closest("[data-nurse-uid]")) as HTMLElement | null;
+        if (!target) return;
+        const cUid = target.dataset.nurseUid;
+        const cDate = target.dataset.date;
+        if (!cUid || !cDate) return;
+        const cKey = `${cUid}_${cDate}`;
+        if (seenKeys.has(cKey)) return;
+        seenKeys.add(cKey);
+        multiDragRef.current!.started = true;
+        ev.preventDefault();
+        setCtrlSelected(prev => {
+          if (prev.has(cKey)) return prev;
+          const next = new Set(prev);
+          next.add(cKey);
+          return next;
+        });
+      };
+      const onEnd = () => {
+        multiDragRef.current = null;
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onEnd);
+        document.removeEventListener('touchcancel', onEnd);
+      };
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onEnd);
+      document.addEventListener('touchcancel', onEnd);
+      return;
+    }
 
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
@@ -1833,37 +1887,18 @@ export default function AdminPage() {
               }}>{revertResult}</div>
             )}
 
-            {/* 批次填入工具列:多選 + 刷子 + 已選數量 + 填入按鈕 */}
+            {/* 批次填入工具列:多選(點=toggle、拖曳=加選)+ 已選數量 + 填入按鈕 */}
             <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:6, padding:"6px 10px", background:"#f8fafc", borderTop:"1px solid #f3f4f6", borderBottom:"1px solid #f3f4f6" }}>
-              {/* 多選模式(手機主用,桌面也可) */}
               <button
-                onClick={() => { setMultiSelectMode(m => !m); setBrushShift(null); if (!multiSelectMode) setCtrlSelected(new Set()); }}
+                onClick={() => { setMultiSelectMode(m => !m); if (!multiSelectMode) setCtrlSelected(new Set()); }}
                 style={{ padding:"4px 10px", borderRadius:6, border:"1px solid", cursor:"pointer", fontSize:12, fontWeight:600,
                   background: multiSelectMode ? "#3b82f6" : "#fff",
                   color: multiSelectMode ? "#fff" : "#374151",
                   borderColor: multiSelectMode ? "#3b82f6" : "#e5e7eb" }}>
-                ☑ 多選{multiSelectMode ? "(開)" : ""}
+                ☑ 多選{multiSelectMode ? "(開,點=選、拖=加)" : ""}
               </button>
-              {/* 刷子模式:選畫筆班別 */}
-              <span style={{ fontSize:11, color:"#9ca3af", marginLeft:6 }}>🖌</span>
-              {[...workShifts, ...restShifts].map(s => (
-                <button key={s.code} onClick={() => { setBrushShift(brushShift === s.code ? null : s.code); setMultiSelectMode(false); setCtrlSelected(new Set()); }}
-                  style={{ padding:"3px 8px", borderRadius:5, border:"1px solid", cursor:"pointer", fontSize:12, fontWeight:600,
-                    background: brushShift === s.code ? "#f59e0b" : "#fff",
-                    color: brushShift === s.code ? "#fff" : (isOff(s.code, offShifts) ? "#dc2626" : "#374151"),
-                    borderColor: brushShift === s.code ? "#f59e0b" : "#e5e7eb" }}>
-                  {s.code}
-                </button>
-              ))}
-              {brushShift && (
-                <button onClick={() => setBrushShift(null)}
-                  style={{ padding:"3px 8px", borderRadius:5, border:"1px solid #dc2626", cursor:"pointer", fontSize:11, background:"#fff", color:"#dc2626" }}>
-                  × 關閉刷子
-                </button>
-              )}
-              {/* 已選 N 格 [填入] */}
               {ctrlSelected.size > 0 && (
-                <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                   <span style={{ fontSize:12, color:"#374151", fontWeight:600 }}>已選 {ctrlSelected.size} 格</span>
                   <button onClick={() => {
                     const cells = [...ctrlSelected].map(k => { const idx = k.indexOf("_"); return { uid: k.slice(0, idx), date: k.slice(idx+1) }; });
@@ -1878,8 +1913,7 @@ export default function AdminPage() {
                   </button>
                 </div>
               )}
-              {/* 捲動速度(移到最右) */}
-              <div style={{ marginLeft: ctrlSelected.size > 0 ? 6 : "auto", display:"flex", alignItems:"center", gap:3 }}>
+              <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:3 }}>
                 <span style={{ fontSize:11, color:"#9ca3af" }}>捲動</span>
                 {([{l:"🐢",v:3},{l:"慢",v:6},{l:"中",v:10},{l:"快",v:14},{l:"🐇",v:18}] as {l:string;v:number}[]).map(({l,v})=>(
                   <button key={v} onClick={()=>{setScrollSpeed(v);localStorage.setItem("scrollSpeed",String(v));}}
@@ -2002,19 +2036,12 @@ export default function AdminPage() {
                           : style;
 
                         function handleClick(e: React.MouseEvent) {
-                          // 🖌 刷子模式:直接填/清該班別(再點取消)
-                          if (brushShift !== null) {
-                            e.preventDefault();
-                            if (row?.confirmed) {
-                              showToast("已確認格不能用刷子,請取消確認先", false);
-                              return;
-                            }
-                            const targetShift = row?.shift === brushShift ? "" : brushShift;
-                            api.post("/schedule/shifts/batch", [{ nurse_uid: u.uid, date: d, shift: targetShift || null }])
-                              .then(() => fetchSchedule()).catch(err => showToast(`✗ ${err.message}`, false));
+                          // 多選模式:若剛拖曳過,拖曳邏輯已處理,skip click
+                          if (multiSelectMode && multiDragRef.current?.started) {
+                            multiDragRef.current = null;
                             return;
                           }
-                          // Ctrl / Meta 或手機多選模式:切換選取(跨人 OK)
+                          // Ctrl / Meta 或多選模式:切換選取(跨人 OK)
                           if (e.ctrlKey || e.metaKey || multiSelectMode) {
                             e.preventDefault();
                             setCtrlSelected(prev => {
@@ -2055,6 +2082,27 @@ export default function AdminPage() {
                           }
                         }
 
+                        // 多選模式:拖曳滑鼠加選(桌面)
+                        function handleMouseDown(e: React.MouseEvent) {
+                          if (!multiSelectMode) return;
+                          if (e.button !== 0) return;
+                          multiDragRef.current = { active: true, started: false };
+                          setCtrlSelected(prev => {
+                            const next = new Set(prev);
+                            next.add(key);
+                            return next;
+                          });
+                        }
+                        function handleMouseEnter() {
+                          if (!multiSelectMode || !multiDragRef.current?.active) return;
+                          multiDragRef.current.started = true;
+                          setCtrlSelected(prev => {
+                            if (prev.has(key)) return prev;
+                            const next = new Set(prev);
+                            next.add(key);
+                            return next;
+                          });
+                        }
                         return (
                           <td key={d} className={`ap-td-shift${isWe && !isRef ? " we" : ""}`} style={{ background: isRef ? "#fafafa" : undefined }}>
                             <span
@@ -2064,6 +2112,8 @@ export default function AdminPage() {
                               data-date={d}
                               data-shift={row?.shift ?? ""}
                               onClick={handleClick}
+                              onMouseDown={handleMouseDown}
+                              onMouseEnter={handleMouseEnter}
                               onTouchStart={handleCellTouchStart}
                               onTouchMove={handleCellTouchMove}
                               onTouchEnd={handleCellTouchEnd}

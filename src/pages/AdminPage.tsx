@@ -274,7 +274,7 @@ export default function AdminPage() {
   const [shiftRange, setShiftRange] = useState<Set<string>>(new Set()); // "uid_date" for shift-range highlight
   const [multiSelectMode, setMultiSelectMode] = useState(false);       // 多選模式(桌面/手機通用):點=toggle、拖曳=加選
   const [batchFillPopup, setBatchFillPopup] = useState<{ cells: {uid:string;date:string}[] } | null>(null);
-  const multiDragRef = useRef<{ active: boolean; started: boolean } | null>(null);
+  const multiDragRef = useRef<{ active: boolean; started: boolean; removeMode: boolean } | null>(null);
   const lastTouchTsRef = useRef<number>(0);   // touch 結束時間戳,阻止 touch 後再觸發 click 重複 toggle
   const [batchPopup, setBatchPopup] = useState<{ nurseUid: string; nurseName: string; dates: string[] } | null>(null);
   const [dragFill, setDragFill] = useState<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
@@ -636,16 +636,18 @@ export default function AdminPage() {
     const shift    = span.dataset.shift;
     if (!nurseUid || !date) return;
 
-    // ── 多選模式:touch 加入 selection(拖曳自動加、單點 toggle)
+    // ── 多選模式:touch 加/減 selection(起始 cell 決定模式)
     if (multiSelectMode) {
       e.stopPropagation();
       const startKey = `${nurseUid}_${date}`;
-      multiDragRef.current = { active: true, started: false };
+      // 起始 cell 已選 → 拖曳走 remove 模式;否則 add 模式
+      const removeMode = ctrlSelected.has(startKey);
+      multiDragRef.current = { active: true, started: false, removeMode };
       const seenKeys = new Set<string>([startKey]);
-      // 起點:toggle
+      // 起點:依模式加/減
       setCtrlSelected(prev => {
         const next = new Set(prev);
-        if (next.has(startKey)) next.delete(startKey); else next.add(startKey);
+        if (removeMode) next.delete(startKey); else next.add(startKey);
         return next;
       });
       const onMove = (ev: TouchEvent) => {
@@ -663,9 +665,11 @@ export default function AdminPage() {
         seenKeys.add(cKey);
         multiDragRef.current!.started = true;
         setCtrlSelected(prev => {
-          if (prev.has(cKey)) return prev;
+          const has = prev.has(cKey);
+          if (removeMode && !has) return prev;
+          if (!removeMode && has) return prev;
           const next = new Set(prev);
-          next.add(cKey);
+          if (removeMode) next.delete(cKey); else next.add(cKey);
           return next;
         });
       };
@@ -2087,24 +2091,25 @@ export default function AdminPage() {
                           }
                         }
 
-                        // 多選模式:拖曳滑鼠加選(桌面)
+                        // 多選模式:拖曳滑鼠加/減選(桌面)
                         function handleMouseDown(e: React.MouseEvent) {
                           if (!multiSelectMode) return;
                           if (e.button !== 0) return;
-                          multiDragRef.current = { active: true, started: false };
-                          setCtrlSelected(prev => {
-                            const next = new Set(prev);
-                            next.add(key);
-                            return next;
-                          });
+                          // 起始 cell 已選 → 拖曳走 remove 模式,反之 add 模式
+                          const removeMode = ctrlSelected.has(key);
+                          multiDragRef.current = { active: true, started: false, removeMode };
+                          // 不在 mousedown 時 add/remove,交給 click 或 mouseenter(避免和 click 抵消)
                         }
                         function handleMouseEnter() {
                           if (!multiSelectMode || !multiDragRef.current?.active) return;
                           multiDragRef.current.started = true;
+                          const removeMode = multiDragRef.current.removeMode;
                           setCtrlSelected(prev => {
-                            if (prev.has(key)) return prev;
+                            const has = prev.has(key);
+                            if (removeMode && !has) return prev;
+                            if (!removeMode && has) return prev;
                             const next = new Set(prev);
-                            next.add(key);
+                            if (removeMode) next.delete(key); else next.add(key);
                             return next;
                           });
                         }

@@ -272,6 +272,9 @@ export default function AdminPage() {
   const [shiftAnchor, setShiftAnchor] = useState<{ nurseUid: string; date: string; shift: string } | null>(null);
   const [ctrlSelected, setCtrlSelected] = useState<Set<string>>(new Set()); // "uid_date"
   const [shiftRange, setShiftRange] = useState<Set<string>>(new Set()); // "uid_date" for shift-range highlight
+  const [brushShift, setBrushShift] = useState<string | null>(null);   // 刷子模式:選定的班別(null=關)
+  const [multiSelectMode, setMultiSelectMode] = useState(false);       // 手機多選模式
+  const [batchFillPopup, setBatchFillPopup] = useState<{ cells: {uid:string;date:string}[] } | null>(null);
   const [batchPopup, setBatchPopup] = useState<{ nurseUid: string; nurseName: string; dates: string[] } | null>(null);
   const [dragFill, setDragFill] = useState<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
   const dragFillRef = useRef<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
@@ -1816,17 +1819,61 @@ export default function AdminPage() {
               }}>{revertResult}</div>
             )}
 
-            {/* 捲動速度選擇器 */}
-            <div style={{ display:"flex", alignItems:"center", gap:4, justifyContent:"flex-end", padding:"4px 8px 2px" }}>
-              <span style={{ fontSize:11, color:"#9ca3af" }}>捲動速度</span>
-              {([{l:"🐢",v:3},{l:"慢",v:6},{l:"中",v:10},{l:"快",v:14},{l:"🐇",v:18}] as {l:string;v:number}[]).map(({l,v})=>(
-                <button key={v} onClick={()=>{setScrollSpeed(v);localStorage.setItem("scrollSpeed",String(v));}}
-                  style={{ padding:"2px 7px", borderRadius:5, border:"1px solid #e5e7eb", fontSize:12, cursor:"pointer",
-                    background:scrollSpeed===v?"#16a34a":"#f9fafb", color:scrollSpeed===v?"#fff":"#374151",
-                    fontWeight:scrollSpeed===v?700:400, lineHeight:1.4 }}>
-                  {l}
+            {/* 批次填入工具列:多選 + 刷子 + 已選數量 + 填入按鈕 */}
+            <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:6, padding:"6px 10px", background:"#f8fafc", borderTop:"1px solid #f3f4f6", borderBottom:"1px solid #f3f4f6" }}>
+              {/* 多選模式(手機主用,桌面也可) */}
+              <button
+                onClick={() => { setMultiSelectMode(m => !m); setBrushShift(null); if (!multiSelectMode) setCtrlSelected(new Set()); }}
+                style={{ padding:"4px 10px", borderRadius:6, border:"1px solid", cursor:"pointer", fontSize:12, fontWeight:600,
+                  background: multiSelectMode ? "#3b82f6" : "#fff",
+                  color: multiSelectMode ? "#fff" : "#374151",
+                  borderColor: multiSelectMode ? "#3b82f6" : "#e5e7eb" }}>
+                ☑ 多選{multiSelectMode ? "(開)" : ""}
+              </button>
+              {/* 刷子模式:選畫筆班別 */}
+              <span style={{ fontSize:11, color:"#9ca3af", marginLeft:6 }}>🖌</span>
+              {[...workShifts, ...restShifts].map(s => (
+                <button key={s.code} onClick={() => { setBrushShift(brushShift === s.code ? null : s.code); setMultiSelectMode(false); setCtrlSelected(new Set()); }}
+                  style={{ padding:"3px 8px", borderRadius:5, border:"1px solid", cursor:"pointer", fontSize:12, fontWeight:600,
+                    background: brushShift === s.code ? "#f59e0b" : "#fff",
+                    color: brushShift === s.code ? "#fff" : (isOff(s.code, offShifts) ? "#dc2626" : "#374151"),
+                    borderColor: brushShift === s.code ? "#f59e0b" : "#e5e7eb" }}>
+                  {s.code}
                 </button>
               ))}
+              {brushShift && (
+                <button onClick={() => setBrushShift(null)}
+                  style={{ padding:"3px 8px", borderRadius:5, border:"1px solid #dc2626", cursor:"pointer", fontSize:11, background:"#fff", color:"#dc2626" }}>
+                  × 關閉刷子
+                </button>
+              )}
+              {/* 已選 N 格 [填入] */}
+              {ctrlSelected.size > 0 && (
+                <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6 }}>
+                  <span style={{ fontSize:12, color:"#374151", fontWeight:600 }}>已選 {ctrlSelected.size} 格</span>
+                  <button onClick={() => {
+                    const cells = [...ctrlSelected].map(k => { const idx = k.indexOf("_"); return { uid: k.slice(0, idx), date: k.slice(idx+1) }; });
+                    setBatchFillPopup({ cells });
+                  }}
+                    style={{ padding:"3px 10px", borderRadius:5, background:"#16a34a", color:"#fff", border:"none", cursor:"pointer", fontSize:12, fontWeight:600 }}>
+                    填入 ▾
+                  </button>
+                  <button onClick={() => setCtrlSelected(new Set())}
+                    style={{ padding:"3px 8px", borderRadius:5, background:"#fff", color:"#6b7280", border:"1px solid #e5e7eb", cursor:"pointer", fontSize:11 }}>
+                    清除
+                  </button>
+                </div>
+              )}
+              {/* 捲動速度(移到最右) */}
+              <div style={{ marginLeft: ctrlSelected.size > 0 ? 6 : "auto", display:"flex", alignItems:"center", gap:3 }}>
+                <span style={{ fontSize:11, color:"#9ca3af" }}>捲動</span>
+                {([{l:"🐢",v:3},{l:"慢",v:6},{l:"中",v:10},{l:"快",v:14},{l:"🐇",v:18}] as {l:string;v:number}[]).map(({l,v})=>(
+                  <button key={v} onClick={()=>{setScrollSpeed(v);localStorage.setItem("scrollSpeed",String(v));}}
+                    style={{ padding:"2px 6px", borderRadius:5, border:"1px solid #e5e7eb", fontSize:11, cursor:"pointer",
+                      background:scrollSpeed===v?"#16a34a":"#f9fafb", color:scrollSpeed===v?"#fff":"#374151",
+                      fontWeight:scrollSpeed===v?700:400, lineHeight:1.4 }}>{l}</button>
+                ))}
+              </div>
             </div>
 
             {/* 浮動日期表頭（表頭捲過頁籤列後固定，對齊表格容器左緣） */}
@@ -1941,15 +1988,23 @@ export default function AdminPage() {
                           : style;
 
                         function handleClick(e: React.MouseEvent) {
-                          // Ctrl / Meta：切換選取（放開 Ctrl 才跳 popup）
-                          if (e.ctrlKey || e.metaKey) {
+                          // 🖌 刷子模式:直接填/清該班別(再點取消)
+                          if (brushShift !== null) {
+                            e.preventDefault();
+                            if (row?.confirmed) {
+                              showToast("已確認格不能用刷子,請取消確認先", false);
+                              return;
+                            }
+                            const targetShift = row?.shift === brushShift ? "" : brushShift;
+                            api.post("/schedule/shifts/batch", [{ nurse_uid: u.uid, date: d, shift: targetShift || null }])
+                              .then(() => fetchSchedule()).catch(err => showToast(`✗ ${err.message}`, false));
+                            return;
+                          }
+                          // Ctrl / Meta 或手機多選模式:切換選取(跨人 OK)
+                          if (e.ctrlKey || e.metaKey || multiSelectMode) {
                             e.preventDefault();
                             setCtrlSelected(prev => {
                               const next = new Set(prev);
-                              // 同一護理師才能加入，不同護理師清空重選
-                              const firstKey = [...next][0];
-                              const firstUid = firstKey ? firstKey.slice(0, firstKey.indexOf("_")) : null;
-                              if (firstUid && firstUid !== u.uid) next.clear();
                               if (next.has(key)) next.delete(key); else next.add(key);
                               return next;
                             });
@@ -4079,6 +4134,35 @@ export default function AdminPage() {
               }
             }},
           ]}
+        />
+      )}
+
+      {/* ── 批次填入 Modal(多選 N 格後選班別) */}
+      {batchFillPopup && (
+        <ShiftModal
+          date={`批次填入`}
+          nurseName={`已選 ${batchFillPopup.cells.length} 格`}
+          current=""
+          workShifts={workShifts}
+          restShifts={restShifts}
+          offShifts={offShifts}
+          onSelect={async (shift) => {
+            const cells = batchFillPopup.cells;
+            setBatchFillPopup(null);
+            if (!window.confirm(`確定要將 ${cells.length} 格填入「${shift || '(清空)'}」?`)) {
+              return;
+            }
+            try {
+              const updates = cells.map(c => ({ nurse_uid: c.uid, date: c.date, shift: shift || null }));
+              await api.post("/schedule/shifts/batch", updates);
+              setCtrlSelected(new Set());
+              await fetchSchedule();
+              showToast(`✓ 批次填入 ${cells.length} 格`);
+            } catch (err: any) {
+              showToast(`✗ ${err.response?.data?.detail ?? err.message}`, false);
+            }
+          }}
+          onClose={() => setBatchFillPopup(null)}
         />
       )}
 

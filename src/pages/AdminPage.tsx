@@ -574,8 +574,22 @@ export default function AdminPage() {
     };
     measure();
     window.addEventListener("resize", measure, { passive: true });
-    return () => window.removeEventListener("resize", measure);
-  }, [tab, schedule, nurseUsers, cycle.start_date, cycle.end_date]);
+    // 監聽 tableWrap 尺寸變化(工具列高度變化會推移 wrap 位置)
+    const wrap = tableWrapRef.current;
+    let ro: ResizeObserver | null = null;
+    if (wrap && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(() => measure());
+      ro.observe(wrap);
+      const tabs = apTabsRef.current;
+      if (tabs) ro.observe(tabs);
+      // 也觀察 wrap 的父容器(工具列變化會影響)
+      if (wrap.parentElement) ro.observe(wrap.parentElement);
+    }
+    return () => {
+      window.removeEventListener("resize", measure);
+      if (ro) ro.disconnect();
+    };
+  }, [tab, schedule, nurseUsers, cycle.start_date, cycle.end_date, ctrlSelected.size, brushShift, multiSelectMode]);
 
   // ── 監聽垂直捲動：表頭捲過頁籤列後顯示浮動表頭
   useEffect(() => {

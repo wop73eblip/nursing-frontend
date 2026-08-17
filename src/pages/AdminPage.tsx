@@ -275,6 +275,7 @@ export default function AdminPage() {
   const [multiSelectMode, setMultiSelectMode] = useState(false);       // 多選模式(桌面/手機通用):點=toggle、拖曳=加選
   const [batchFillPopup, setBatchFillPopup] = useState<{ cells: {uid:string;date:string}[] } | null>(null);
   const multiDragRef = useRef<{ active: boolean; started: boolean } | null>(null);
+  const lastTouchTsRef = useRef<number>(0);   // touch 結束時間戳,阻止 touch 後再觸發 click 重複 toggle
   const [batchPopup, setBatchPopup] = useState<{ nurseUid: string; nurseName: string; dates: string[] } | null>(null);
   const [dragFill, setDragFill] = useState<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
   const dragFillRef = useRef<{ nurseUid: string; dates: Set<string>; shift: string } | null>(null);
@@ -635,18 +636,20 @@ export default function AdminPage() {
     const shift    = span.dataset.shift;
     if (!nurseUid || !date) return;
 
-    // ── 多選模式:touch 加入 selection(拖曳自動加,不 toggle)
+    // ── 多選模式:touch 加入 selection(拖曳自動加、單點 toggle)
     if (multiSelectMode) {
+      e.stopPropagation();
       const startKey = `${nurseUid}_${date}`;
       multiDragRef.current = { active: true, started: false };
       const seenKeys = new Set<string>([startKey]);
-      // 起點:加入(若已在則移除 - 這是「點擊」語意,拖曳時 started 才會 true)
+      // 起點:toggle
       setCtrlSelected(prev => {
         const next = new Set(prev);
         if (next.has(startKey)) next.delete(startKey); else next.add(startKey);
         return next;
       });
       const onMove = (ev: TouchEvent) => {
+        ev.preventDefault();   // 全部 preventDefault 阻止畫面 scroll
         const t = ev.touches[0];
         const el = document.elementFromPoint(t.clientX, t.clientY) as HTMLElement | null;
         if (!el) return;
@@ -659,7 +662,6 @@ export default function AdminPage() {
         if (seenKeys.has(cKey)) return;
         seenKeys.add(cKey);
         multiDragRef.current!.started = true;
-        ev.preventDefault();
         setCtrlSelected(prev => {
           if (prev.has(cKey)) return prev;
           const next = new Set(prev);
@@ -668,6 +670,7 @@ export default function AdminPage() {
         });
       };
       const onEnd = () => {
+        lastTouchTsRef.current = Date.now();   // 標記 touch 結束時間,阻止後續 click 重複 toggle
         multiDragRef.current = null;
         document.removeEventListener('touchmove', onMove);
         document.removeEventListener('touchend', onEnd);
@@ -1960,7 +1963,7 @@ export default function AdminPage() {
             )}
 
             {/* 表格 */}
-            <div ref={tableWrapRef} style={{ overflowX:"auto", WebkitOverflowScrolling:"touch", userSelect:"none", WebkitUserSelect:"none" as any }}>
+            <div ref={tableWrapRef} style={{ overflowX:"auto", WebkitOverflowScrolling:"touch", userSelect:"none", WebkitUserSelect:"none" as any, touchAction: multiSelectMode ? "none" : undefined }}>
               <table className="tbl">
                 <thead>
                   {/* 分段標題列（只在有週期時顯示） */}
@@ -2036,6 +2039,8 @@ export default function AdminPage() {
                           : style;
 
                         function handleClick(e: React.MouseEvent) {
+                          // 剛 touch 完(手機):skip click 避免重複 toggle
+                          if (Date.now() - lastTouchTsRef.current < 500) return;
                           // 多選模式:若剛拖曳過,拖曳邏輯已處理,skip click
                           if (multiSelectMode && multiDragRef.current?.started) {
                             multiDragRef.current = null;

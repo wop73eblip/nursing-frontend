@@ -1963,7 +1963,7 @@ export default function AdminPage() {
             )}
 
             {/* 表格 */}
-            <div ref={tableWrapRef} style={{ overflowX:"auto", WebkitOverflowScrolling:"touch", userSelect:"none", WebkitUserSelect:"none" as any, touchAction: multiSelectMode ? "none" : undefined }}>
+            <div ref={tableWrapRef} style={{ overflowX:"auto", WebkitOverflowScrolling:"touch", userSelect:"none", WebkitUserSelect:"none" as any }}>
               <table className="tbl">
                 <thead>
                   {/* 分段標題列（只在有週期時顯示） */}
@@ -2112,7 +2112,7 @@ export default function AdminPage() {
                           <td key={d} className={`ap-td-shift${isWe && !isRef ? " we" : ""}`} style={{ background: isRef ? "#fafafa" : undefined }}>
                             <span
                               className={cls}
-                              style={cellFinalStyle}
+                              style={{ ...cellFinalStyle, touchAction: multiSelectMode ? "none" : undefined }}
                               data-nurse-uid={u.uid}
                               data-date={d}
                               data-shift={row?.shift ?? ""}

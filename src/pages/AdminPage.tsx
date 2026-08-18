@@ -659,7 +659,7 @@ export default function AdminPage() {
           if (removeMode) next.delete(startKey); else next.add(startKey);
           return next;
         });
-        try { if (navigator.vibrate) navigator.vibrate(25); } catch {}
+        try { if (navigator.vibrate) navigator.vibrate(50); } catch {}
       }, 150);
 
       const onMove = (ev: TouchEvent) => {

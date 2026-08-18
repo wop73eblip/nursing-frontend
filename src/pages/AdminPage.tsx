@@ -1977,7 +1977,7 @@ export default function AdminPage() {
                     <tbody>
                       <tr>
                         {apColWidths.map((w, i) => {
-                          if (i === 0) return <th key={i} className="sticky-name sticky-name-head" style={{ width:w, minWidth:w, padding:"9px 12px" }}>姓名</th>;
+                          if (i === 0) return <th key={i} className="sticky-name sticky-name-head" style={{ width:w, minWidth:w, padding:"8px 10px" }}>姓名</th>;
                           if (i === 1) return <th key={i} className="sticky-attr-head" style={{ width:w, minWidth:w, left: apColWidths[0] || 70 }}>班屬</th>;
                           const d = allDays[i-2];
                           if (!d) return <th key={i} style={{ width:w }} />;

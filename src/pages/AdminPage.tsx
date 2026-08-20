@@ -621,6 +621,14 @@ export default function AdminPage() {
     const wrap = tableWrapRef.current;
     const sticky = apStickyScrollRef.current;
     if (!wrap || !sticky) return;
+    // 初始立即同步(避免剛出現時位置未對齊,需左右滑才對正)
+    sticky.scrollLeft = wrap.scrollLeft;
+    // 用 requestAnimationFrame 再同步一次(確保 sticky 已 render 完成後對齊)
+    requestAnimationFrame(() => {
+      if (apStickyScrollRef.current && tableWrapRef.current) {
+        apStickyScrollRef.current.scrollLeft = tableWrapRef.current.scrollLeft;
+      }
+    });
     const onScroll = () => { sticky.scrollLeft = wrap.scrollLeft; };
     wrap.addEventListener("scroll", onScroll, { passive: true });
     return () => wrap.removeEventListener("scroll", onScroll);
@@ -4263,15 +4271,28 @@ export default function AdminPage() {
             if (!window.confirm(`確定要將 ${cells.length} 格填入「${shift || '(清空)'}」?`)) {
               return;
             }
-            try {
-              const updates = cells.map(c => ({ nurse_uid: c.uid, date: c.date, shift: shift || null }));
-              await api.post("/schedule/shifts/batch", updates);
-              setCtrlSelected(new Set());
-              await fetchSchedule();
-              showToast(`✓ 批次填入 ${cells.length} 格`);
-            } catch (err: any) {
+            const updates = cells.map(c => ({ nurse_uid: c.uid, date: c.date, shift: shift || null }));
+            // Optimistic update:立即更新本地 state,不等 API
+            setSchedule(prev => {
+              const map = new Map(prev.map(r => [`${r.nurse_uid}_${r.date}`, r]));
+              for (const c of cells) {
+                const k = `${c.uid}_${c.date}`;
+                const old = map.get(k);
+                map.set(k, {
+                  ...(old || { nurse_uid: c.uid, date: c.date, confirmed: false } as any),
+                  shift: shift || null,
+                  confirmed: false,
+                });
+              }
+              return Array.from(map.values());
+            });
+            setCtrlSelected(new Set());
+            showToast(`✓ 批次填入 ${cells.length} 格`);
+            // 背景 post,失敗時 refetch 恢復真實狀態
+            api.post("/schedule/shifts/batch", updates).catch((err: any) => {
               showToast(`✗ ${err.response?.data?.detail ?? err.message}`, false);
-            }
+              fetchSchedule();
+            });
           }}
           onClose={() => setBatchFillPopup(null)}
         />

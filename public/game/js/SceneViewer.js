@@ -97,7 +97,11 @@ export class SceneViewer {
 
     // 決定下一張要顯示到哪個 img slot（跟目前不同的那張）
     const next = this._activeImg === this.imgA ? this.imgB : this.imgA;
-    const url = this.imageBase + scene.image;
+    // 自動找出實際存在的副檔名（.jpg/.png/.webp）；使用者放的檔名跟 scenes.json
+    // 寫的副檔名不一致也 OK，用哪個都會被找到。
+    const image = await this._resolveImage(scene);
+    if (token !== this._renderToken) return;
+    const url = this.imageBase + image;
     const absUrl = new URL(url, location.href).href;
     next.alt = "（尚未提供圖片：" + scene.image + "）";
 
@@ -197,16 +201,52 @@ export class SceneViewer {
     Object.keys(this.scenes).forEach((id) => this._preload(id));
   }
 
-  _preload(sceneId) {
+  async _preload(sceneId) {
     const s = this.scenes[sceneId];
     if (!s || !s.image) return;
-    const url = this.imageBase + s.image;
+    // 先解析出實際存在的副檔名，順便預先下載＋解碼
+    const image = await this._resolveImage(s);
+    const url = this.imageBase + image;
     if (SceneViewer._preloaded.has(url)) return;
     SceneViewer._preloaded.add(url);
     const img = new Image();
     img.src = url;
-    // 用 decode() 觸發背景解碼，切場景時就不用再 decode
     if (img.decode) img.decode().catch(() => {});
+  }
+
+  // 找出 scene.image 對應的實際檔案：依序試 scene.image 本身、然後常見副檔名
+  // (jpg/png/webp)。第一個能載入的就記在 scene._resolvedImage，之後直接用。
+  async _resolveImage(scene) {
+    if (scene._resolvedImage) return scene._resolvedImage;
+    if (scene._resolvingPromise) return scene._resolvingPromise;
+
+    const candidates = this._imageCandidates(scene.image);
+    scene._resolvingPromise = (async () => {
+      for (const name of candidates) {
+        const ok = await this._probeImage(this.imageBase + name);
+        if (ok) { scene._resolvedImage = name; return name; }
+      }
+      // 全部載不到 → 用原本寫的（讓錯誤照舊觸發 sv-broken）
+      scene._resolvedImage = scene.image;
+      return scene.image;
+    })();
+    return scene._resolvingPromise;
+  }
+
+  _imageCandidates(imageField) {
+    const base = imageField.replace(/\.(jpe?g|png|webp|gif)$/i, "");
+    const list = [imageField, base + ".jpg", base + ".png", base + ".webp"];
+    // 去重、維持順序
+    return list.filter((v, i) => list.indexOf(v) === i);
+  }
+
+  _probeImage(url) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = url;
+    });
   }
 
   _layoutPixelHotspots() {

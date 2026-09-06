@@ -65,6 +65,17 @@ export class Dialogue {
     this.textEl = this.overlay.querySelector(".dlg-text");
     this.choicesEl = this.overlay.querySelector(".dlg-choices");
     this.contBtn = this.overlay.querySelector(".dlg-cont-btn");
+
+    // 線性對話（無 choices）時，點對話框任何位置也能繼續 —— 手機比較好按。
+    // 若有選項則忽略（避免誤觸選項變成隨機推進）。
+    this.overlay.addEventListener("click", (e) => {
+      if (!this.active) return;
+      if (this.choicesEl.children.length > 0) return; // 有選項時不 autoadvance
+      // 已點在選項按鈕或繼續按鈕上時，讓原生 handler 處理
+      if (e.target.closest(".dlg-opt") || e.target.closest(".dlg-cont-btn")) return;
+      if (this.contBtn.parentElement.style.display === "none") return;
+      this.contBtn.click();
+    });
   }
 
   isActive() {

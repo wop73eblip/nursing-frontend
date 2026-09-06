@@ -10,5 +10,9 @@
   "got_cabinet_key": {
     "start": "a",
     "nodes": { "a": { "who": "🗝️ 你", "text": "你撿起了一把 <b>會議室櫃子鑰匙</b>。", "give": "conference_cabinet_key", "next": null } }
+  },
+  "need_select_cabinet_key": {
+    "start": "a",
+    "nodes": { "a": { "who": "🔒 櫃子", "text": "哇!沒有鑰匙打不開耶", "next": null } }
   }
 }

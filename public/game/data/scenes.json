@@ -44,7 +44,26 @@
     "hotspots": [
       { "id": "forward", "rect": [853, 517, 1057, 722], "goto": "conference_room_pc" }
     ],
-    "exits": { "back": "conference_room_front" }
+    "exits": { "left": "conference_room_cabinet", "back": "conference_room_front" }
+  },
+  "conference_room_cabinet": {
+    "image": "conference_room_cabinet.png",
+    "hotspots": [
+      { "id": "forward", "rect": [550, 940, 1002, 1242], "goto": "conference_RLQ_close" }
+    ],
+    "exits": { "back": "conference_room_right" }
+  },
+  "conference_RLQ_close": {
+    "image": "conference_RLQ_close.png",
+    "hotspots": [
+      { "id": "keyhole", "rect": [541, 783, 615, 952], "action": "use_cabinet_key" }
+    ],
+    "exits": { "back": "conference_room_cabinet" }
+  },
+  "conference_RLQ_open": {
+    "image": "conference_RLQ_open.png",
+    "hotspots": [],
+    "exits": { "back": "conference_room_cabinet" }
   },
   "conference_room_pc": {
     "image": "conference_room_pc.jpg",

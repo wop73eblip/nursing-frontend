@@ -57,6 +57,18 @@ export const actionHandlers = {
     });
   },
 
+  // 會議室櫃子鎖孔：要先在背包點選「會議室櫃子鑰匙」再點鎖孔才會開
+  // 開了以後鑰匙就消失（單次使用）
+  use_cabinet_key(ctx) {
+    if (ctx.inventory.getSelected() === "conference_cabinet_key") {
+      ctx.inventory.clearSelection();
+      ctx.state.removeItem("conference_cabinet_key");
+      ctx.viewer.goto("conference_RLQ_open");
+    } else {
+      ctx.dialogue.run("need_select_cabinet_key");
+    }
+  },
+
   // 之後陸續補：其他 hotspot 事件 ...
 };
 

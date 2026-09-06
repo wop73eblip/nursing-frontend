@@ -273,6 +273,10 @@ export default function AdminPage() {
   const [ctrlSelected, setCtrlSelected] = useState<Set<string>>(new Set()); // "uid_date"
   const [shiftRange, setShiftRange] = useState<Set<string>>(new Set()); // "uid_date" for shift-range highlight
   const [multiSelectMode, setMultiSelectMode] = useState(false);       // 多選模式(桌面/手機通用):點=toggle、拖曳=加選
+  // 上週期模式:點班屬格 → 彈窗編輯上週期 D/E/N 計數(供 H7 雙週期硬上限用)
+  const [prevCycleMode, setPrevCycleMode] = useState(false);           // session-only,不持久化
+  const [prevCycleCounts, setPrevCycleCounts] = useState<Record<string, {D:number;E:number;N:number}>>({});
+  const [prevCyclePopup, setPrevCyclePopup] = useState<{ uid: string; name: string } | null>(null);
   const [batchFillPopup, setBatchFillPopup] = useState<{ cells: {uid:string;date:string}[] } | null>(null);
   const multiDragRef = useRef<{ active: boolean; started: boolean; removeMode: boolean } | null>(null);
   const lastTouchTsRef = useRef<number>(0);   // touch 結束時間戳,阻止 touch 後再觸發 click 重複 toggle
@@ -295,8 +299,6 @@ export default function AdminPage() {
   const allDaysRef = useRef<string[]>([]);
   const [swipeDates, setSwipeDates] = useState<Set<string>>(new Set());
   const [swipePopup, setSwipePopup] = useState<{ nurseUid: string; nurseName: string; dates: string[] } | null>(null);
-  // 捲動速度
-  const [scrollSpeed, setScrollSpeed] = useState<number>(() => Number(localStorage.getItem('scrollSpeed') ?? 10));
   const autoScrollFrameRef = useRef<number | null>(null);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
   const apTabsRef = useRef<HTMLDivElement | null>(null);         // 頁籤列（量測浮動表頭起始 Y）
@@ -306,8 +308,6 @@ export default function AdminPage() {
   const [apColWidths, setApColWidths] = useState<number[]>([]);
   const [apStickyBox, setApStickyBox] = useState<{ left: number; width: number; top: number }>({ left: 0, width: 0, top: 96 });
   const nurseUsersRef = useRef<User[]>([]);
-  const scrollSpeedRef = useRef<number>(10);
-  useEffect(() => { scrollSpeedRef.current = scrollSpeed; }, [scrollSpeed]);
 
   // 桌機滑鼠拖曳捲動班表（按住拖曳：左右捲表格容器、上下捲整個頁面；拖曳時不觸發格子點選）
   // 橫向用 pageX 捲 wrap.scrollLeft；縱向用 clientY（視窗相對，避免頁面捲動造成座標回饋）捲 window。
@@ -428,8 +428,8 @@ export default function AdminPage() {
     weekly_max_off_auto: 2,        // 規則6：自動休每週上限
     weekly_max_off_total: 3,       // 規則7：含指定休每週上限
     one_in_seven: true,            // 規則8：一例一休（每週≥2天休）
-    lock_designated_off: true,     // 規則10：指定休不可覆蓋
     allow_fixed_deviation: false,  // 固定班可偏離最多2格；未勾（預設）＝完全不可偏離
+    off_priority: true,            // H18 應休優先：先滿足每人應休天數，才可有人超休
     notes: "",
   });
 
@@ -444,6 +444,8 @@ export default function AdminPage() {
   // 個別護理師比例覆蓋
   type RatioOverride = { nurse_uid: string; ratio: Record<string, number> };
   const [ratioOverrides, setRatioOverrides] = useState<RatioOverride[]>([]);
+  // 個別護理師 attr 偏離配額
+  const [nurseDevOverrides, setNurseDevOverrides] = useState<Array<{nurse_uid: string; days: number}>>([]);
   // 已儲存快照（一鍵生成頁籤只顯示已寫入資料庫的值，避免誤以為已儲存）
   const [savedCycle, setSavedCycle] = useState<typeof cycle | null>(null);
   const [savedRules, setSavedRules] = useState<typeof rulesForm | null>(null);
@@ -472,9 +474,9 @@ export default function AdminPage() {
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
   const GEN_PROFILES = [
-    { key: "balanced", label: "分數最高版", desc: "整體懲罰總分最低（預設平衡權重）" },
-    { key: "smooth",   label: "順班優先版", desc: "切換懲罰加倍，連班更整齊" },
-    { key: "fair",     label: "公平優先版", desc: "比例／休假公平懲罰加倍，各班種分配更平均；固定班嚴格（固定D只排D，完全不可偏離，湊不出則此版失敗）" },
+    { key: "balanced", label: "平衡版", desc: "balanced · 預設 · 綜合平衡。全部懲罰值用原倍率（各項數值可於「進階調參」調整），適合大多數情況、想要各面向兼顧。" },
+    { key: "smooth",   label: "順班優先版", desc: "smooth · 順班優先。切換相關懲罰加倍（倍率 SMOOTH_SWITCH_MULT 可於進階調參調整），連班更整齊、換班更少。" },
+    { key: "fair",     label: "公平優先版", desc: "fair · 公平優先。比例／休假公平懲罰加倍（倍率 FAIR_DIST_MULT 可於進階調參調整），各班種分配更平均；固定班嚴格（固定D只排D、完全不可偏離，湊不出則此版失敗）。" },
   ] as const;
   type GenProfileKey = typeof GEN_PROFILES[number]["key"];
   type GenVersion = {
@@ -490,6 +492,62 @@ export default function AdminPage() {
   const [genVersions, setGenVersions] = useState<Partial<Record<GenProfileKey, GenVersion>>>({});
   // 暖啟動：記憶上次成功生成的三版結果，下次生成時作為 solver hint（各 profile 各自傳自己上次的解）
   const [lastGenSchedules, setLastGenSchedules] = useState<Partial<Record<GenProfileKey, Record<string, Record<string, string>>>>>({});
+  // 隨機探索 checkbox(session-only,不持久化,refresh 後自動取消)
+  const [randomExplore, setRandomExplore] = useState<Partial<Record<GenProfileKey, boolean>>>({});
+  // 每個 profile 上次成功的 seed(localStorage 快取,下次自動用)
+  const [bestSeedByProfile, setBestSeedByProfile] = useState<Partial<Record<GenProfileKey, number>>>(() => {
+    try { return JSON.parse(localStorage.getItem("bestSeedByProfile_v1") || "{}"); } catch { return {}; }
+  });
+  function persistBestSeed(next: Partial<Record<GenProfileKey, number>>) {
+    try { localStorage.setItem("bestSeedByProfile_v1", JSON.stringify(next)); } catch {}
+    setBestSeedByProfile(next);
+  }
+  // 深度輪替:記錄各 profile 在當前 rules_hash 下已失敗過的 seeds,下次生成從未 tried 的挑
+  type SeedFailState = { rules_hash: string; triedSeeds: number[] };
+  const [seedFailState, setSeedFailState] = useState<Partial<Record<GenProfileKey, SeedFailState>>>(() => {
+    try { return JSON.parse(localStorage.getItem("seedFailState_v1") || "{}"); } catch { return {}; }
+  });
+  function persistSeedFail(next: Partial<Record<GenProfileKey, SeedFailState>>) {
+    try { localStorage.setItem("seedFailState_v1", JSON.stringify(next)); } catch {}
+    setSeedFailState(next);
+  }
+  // 每 profile 的 seed pool(順序 = 首選 → fallback,與 backend 一致)
+  const SEED_POOLS: Record<GenProfileKey, number[]> = {
+    balanced: [12345, 42, 7, 137, 0],
+    smooth: [7, 42, 137, 0, 1000],
+    fair: [1, 12345, 42, 137, 1000],
+  };
+  // 為某 profile 挑「下一個要試的 seed」:優先 cached best;若已試過或失敗過,挑 pool 中未 tried 的
+  function pickSeedForProfile(profile: GenProfileKey, rules_hash: string): number {
+    const pool = SEED_POOLS[profile] ?? [0];
+    const fs = seedFailState[profile];
+    // 規則變過或無記錄 → 從 cached best 或 pool[0] 開始
+    if (!fs || fs.rules_hash !== rules_hash) {
+      return bestSeedByProfile[profile] ?? pool[0];
+    }
+    // 有 rules_hash 相同的 tried 記錄 → 挑 pool 中未 tried 的第一個
+    const untried = pool.filter(s => !fs.triedSeeds.includes(s));
+    if (untried.length > 0) return untried[0];
+    // 全都 tried 過 → reset,回到 cached best 或 pool[0](重新輪一遍)
+    return bestSeedByProfile[profile] ?? pool[0];
+  }
+  // 歷史最佳解 hint(比 lastGenSchedules 好用:只更新更好的解、失敗/救援不更新、規則變動自動失效)
+  type GenBest = { schedules: Record<string, Record<string, string>>; objective: number | null; rules_hash: string };
+  const [bestGen, setBestGen] = useState<Partial<Record<GenProfileKey, GenBest>>>(() => {
+    try { return JSON.parse(localStorage.getItem("bestGen_v1") || "{}"); } catch { return {}; }
+  });
+  function persistBestGen(b: Partial<Record<GenProfileKey, GenBest>>) {
+    try { localStorage.setItem("bestGen_v1", JSON.stringify(b)); } catch {}
+    setBestGen(b);
+  }
+  function computeRulesHash(): string {
+    // 計入影響 solver 的參數:penalties + scheduling + ratio(排除純顯示欄位如 notes)
+    const { notes: _n1, ...schedClean } = rulesForm as any;
+    const s = JSON.stringify({ pen: penaltyForm, sch: schedClean, rat: ratioForm });
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return String(h);
+  }
   const [selectedProfile, setSelectedProfile] = useState<GenProfileKey | null>(null);
   const [warnOpen, setWarnOpen] = useState<Record<string, boolean>>({});   // 版本卡「警告」展開狀態
   const [pqOpen, setPqOpen] = useState<Record<string, boolean>>({});         // 版本卡「品質分數」展開狀態
@@ -564,16 +622,32 @@ export default function AdminPage() {
       if (!row) return;
       const ths = Array.from(row.querySelectorAll("th"));
       if (!ths.length || ths[0].getBoundingClientRect().width === 0) return;
-      setApColWidths(ths.map(th => th.getBoundingClientRect().width));
+      // 量測 thead + 所有 body 列,每欄取最大寬度(避免某些列有 半/新/行政 tag 撐大導致 sticky 用小值錯位)
+      const tbodyRows = row.parentElement?.parentElement?.querySelectorAll("tbody tr");
+      const widths = ths.map((th, i) => {
+        let maxW = th.getBoundingClientRect().width;
+        if (tbodyRows) {
+          tbodyRows.forEach(tr => {
+            const cell = (tr.children[i] as HTMLElement | undefined);
+            if (cell) {
+              const w = cell.getBoundingClientRect().width;
+              if (w > maxW) maxW = w;
+            }
+          });
+        }
+        return Math.round(maxW);
+      });
+      setApColWidths(widths);
       const wrap = tableWrapRef.current;
       const tabs = apTabsRef.current;
       if (wrap) {
         const r = wrap.getBoundingClientRect();
         const top = tabs ? tabs.getBoundingClientRect().bottom : 96;
-        setApStickyBox({ left: r.left, width: r.width, top });
+        setApStickyBox({ left: Math.round(r.left), width: Math.round(r.width), top: Math.round(top) });
       }
     };
-    measure();
+    // rAF 兩次確保 layout+paint 完成再量(第一次可能還沒 render 完 tags/字重)
+    requestAnimationFrame(() => requestAnimationFrame(measure));
     window.addEventListener("resize", measure, { passive: true });
     // 監聽 tableWrap 尺寸變化(工具列高度變化會推移 wrap 位置)
     const wrap = tableWrapRef.current;
@@ -688,28 +762,49 @@ export default function AdminPage() {
         // 已進拖曳:preventDefault + 加/減
         ev.preventDefault();
         const el = document.elementFromPoint(t.clientX, t.clientY) as HTMLElement | null;
-        if (!el) return;
-        const target = (el.dataset?.nurseUid ? el : el.closest("[data-nurse-uid]")) as HTMLElement | null;
-        if (!target) return;
-        const cUid = target.dataset.nurseUid;
-        const cDate = target.dataset.date;
-        if (!cUid || !cDate) return;
-        const cKey = `${cUid}_${cDate}`;
-        if (seenKeys.has(cKey)) return;
-        seenKeys.add(cKey);
-        multiDragRef.current!.started = true;
-        setCtrlSelected(prev => {
-          const has = prev.has(cKey);
-          if (removeMode && !has) return prev;
-          if (!removeMode && has) return prev;
-          const next = new Set(prev);
-          if (removeMode) next.delete(cKey); else next.add(cKey);
-          return next;
-        });
+        if (el) {
+          const target = (el.dataset?.nurseUid ? el : el.closest("[data-nurse-uid]")) as HTMLElement | null;
+          if (target) {
+            const cUid = target.dataset.nurseUid;
+            const cDate = target.dataset.date;
+            if (cUid && cDate) {
+              const cKey = `${cUid}_${cDate}`;
+              if (!seenKeys.has(cKey)) {
+                seenKeys.add(cKey);
+                multiDragRef.current!.started = true;
+                setCtrlSelected(prev => {
+                  const has = prev.has(cKey);
+                  if (removeMode && !has) return prev;
+                  if (!removeMode && has) return prev;
+                  const next = new Set(prev);
+                  if (removeMode) next.delete(cKey); else next.add(cKey);
+                  return next;
+                });
+              }
+            }
+          }
+        }
+        // 邊緣自動水平捲動(180px/秒),讓使用者拖到螢幕邊緣時表格自動跟上
+        const wrap = tableWrapRef.current;
+        const spd = 3;
+        if (wrap) {
+          if (autoScrollFrameRef.current) cancelAnimationFrame(autoScrollFrameRef.current);
+          const W = window.innerWidth;
+          if (t.clientX > W * 0.8) {
+            const scroll = () => { wrap.scrollLeft += spd; autoScrollFrameRef.current = requestAnimationFrame(scroll); };
+            autoScrollFrameRef.current = requestAnimationFrame(scroll);
+          } else if (t.clientX < W * 0.2) {
+            const scroll = () => { wrap.scrollLeft -= spd; autoScrollFrameRef.current = requestAnimationFrame(scroll); };
+            autoScrollFrameRef.current = requestAnimationFrame(scroll);
+          } else {
+            autoScrollFrameRef.current = null;
+          }
+        }
       };
       const onEnd = () => {
         clearTimeout(timer);
         lastTouchTsRef.current = Date.now();
+        if (autoScrollFrameRef.current) { cancelAnimationFrame(autoScrollFrameRef.current); autoScrollFrameRef.current = null; }
         if (!entered && !cancelled) {
           // 短按(< 150ms 抬起):toggle 起始 cell(單擊)
           setCtrlSelected(prev => {
@@ -728,6 +823,10 @@ export default function AdminPage() {
       document.addEventListener('touchcancel', onEnd);
       return;
     }
+
+    // 非多選模式:完全不做拖曳偵測(拖曳功能限制在多選模式,避免誤觸)
+    // 單擊由 React onClick 處理,不需要 touchmove/touchend 監聽
+    if (!multiSelectMode) return;
 
     const touch = e.touches[0];
     touchStartPos.current = { x: touch.clientX, y: touch.clientY };
@@ -789,7 +888,7 @@ export default function AdminPage() {
 
         // 邊緣自動捲動
         const wrap = tableWrapRef.current;
-        const spd = scrollSpeedRef.current;
+        const spd = 3;   // 固定 180px/秒(60fps × 3)
         if (wrap) {
           if (autoScrollFrameRef.current) cancelAnimationFrame(autoScrollFrameRef.current);
           const W = window.innerWidth;
@@ -1011,6 +1110,8 @@ export default function AdminPage() {
       if (r.ratio) setRatioForm(prev => ({ ...prev, ...r.ratio }));
       if (r.penalties) setPenaltyForm(r.penalties);
       if (r.ratio_overrides) setRatioOverrides(r.ratio_overrides);
+      if (r.nurse_deviation_overrides) setNurseDevOverrides(r.nurse_deviation_overrides);
+      if (r.prev_cycle_counts) setPrevCycleCounts(r.prev_cycle_counts);
       if (r.shifts?.work) { setWorkShifts(r.shifts.work); setEditWorkShifts(r.shifts.work); }
       if (r.shifts?.rest) { setRestShifts(r.shifts.rest); setEditRestShifts(r.shifts.rest); }
       if (r.shifts?.off)  { setOffShifts(r.shifts.off);  setEditOffShifts(r.shifts.off);   }
@@ -1384,7 +1485,7 @@ export default function AdminPage() {
   }
   async function saveSchedulingRules() {
     try {
-      await api.post("/rules", { rules: { scheduling: rulesForm, ratio: ratioForm, ratio_overrides: ratioOverrides, penalties: penaltyForm } });
+      await api.post("/rules", { rules: { scheduling: rulesForm, ratio: ratioForm, ratio_overrides: ratioOverrides, penalties: penaltyForm, nurse_deviation_overrides: nurseDevOverrides } });
       setSavedRules(rulesForm);   // 儲存成功後才更新一鍵生成頁籤顯示的快照
       showToast("✓ 排班規則已儲存");
     } catch (err: any) {
@@ -1635,6 +1736,15 @@ export default function AdminPage() {
         input[type="time"].finput::-webkit-inner-spin-button { display: none; -webkit-appearance: none; }
         /* 佔位提示（空值時）文字對齊左邊 */
         input[type="date"].finput, input[type="time"].finput { text-align: left; }
+        /* 個別護理師偏離次數:手機縮小數字輸入 */
+        @media (max-width: 768px) {
+          .dev-days-input { width: 32px !important; padding: 3px 2px !important; font-size: 11px !important; }
+        }
+        /* 填表截止日時間欄:桌面 140px(留時鐘 icon 空間)、手機 100px(避免佔太寬) */
+        .deadline-time-input { width: 140px !important; flex: 0 0 140px !important; }
+        @media (max-width: 768px) {
+          .deadline-time-input { width: 100px !important; flex: 0 0 100px !important; }
+        }
         .fcheck { display: flex; align-items: center; gap: 8px; }
         .fcheck input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #2563eb; }
 
@@ -1949,6 +2059,15 @@ export default function AdminPage() {
                   borderColor: multiSelectMode ? "#3b82f6" : "#e5e7eb" }}>
                 ☑ 多選{multiSelectMode ? "(開,點=選、拖=加)" : ""}
               </button>
+              <button
+                onClick={() => setPrevCycleMode(m => !m)}
+                title="開啟後,點護理師「班屬」格會彈窗編輯上週期 D/E/N 計數,供 H7 雙週期硬上限使用。session-only,重整頁面自動關"
+                style={{ padding:"4px 10px", borderRadius:6, border:"1px solid", cursor:"pointer", fontSize:12, fontWeight:600,
+                  background: prevCycleMode ? "#3b82f6" : "#f3f4f6",
+                  color: prevCycleMode ? "#fff" : "#6b7280",
+                  borderColor: prevCycleMode ? "#3b82f6" : "#d1d5db" }}>
+                上週期{prevCycleMode ? "(點班屬編輯)" : ""}
+              </button>
               {ctrlSelected.size > 0 && (
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
                   <span style={{ fontSize:12, color:"#374151", fontWeight:600 }}>已選 {ctrlSelected.size} 格</span>
@@ -1965,15 +2084,6 @@ export default function AdminPage() {
                   </button>
                 </div>
               )}
-              <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:3 }}>
-                <span style={{ fontSize:11, color:"#9ca3af" }}>捲動</span>
-                {([{l:"🐢",v:3},{l:"慢",v:6},{l:"中",v:10},{l:"快",v:14},{l:"🐇",v:18}] as {l:string;v:number}[]).map(({l,v})=>(
-                  <button key={v} onClick={()=>{setScrollSpeed(v);localStorage.setItem("scrollSpeed",String(v));}}
-                    style={{ padding:"2px 6px", borderRadius:5, border:"1px solid #e5e7eb", fontSize:11, cursor:"pointer",
-                      background:scrollSpeed===v?"#16a34a":"#f9fafb", color:scrollSpeed===v?"#fff":"#374151",
-                      fontWeight:scrollSpeed===v?700:400, lineHeight:1.4 }}>{l}</button>
-                ))}
-              </div>
             </div>
 
             {/* 浮動日期表頭（表頭捲過頁籤列後固定，對齊表格容器左緣） */}
@@ -2057,10 +2167,22 @@ export default function AdminPage() {
                       <td className="sticky-name" style={{ padding:"7px 10px", fontSize:15, fontWeight:700 }}>
                         {u.name}
                         {u.halftime && <span style={{ fontSize:9, color:"#16a34a", fontWeight:700, marginLeft:3 }}>半</span>}
+                        {u.is_trainee && <span style={{ fontSize:9, color:"#f97316", fontWeight:700, marginLeft:3 }}>新</span>}
                         {u.admin_staff && <span style={{ fontSize:9, color:"#7c3aed", fontWeight:700, marginLeft:3 }}>行政</span>}
                       </td>
-                      <td className="sticky-attr" style={{ left: apColWidths[0] || 70 }}>
+                      <td className="sticky-attr"
+                        onClick={prevCycleMode ? () => setPrevCyclePopup({ uid: u.uid, name: u.name || u.uid }) : undefined}
+                        style={{
+                          left: apColWidths[0] || 70,
+                          cursor: prevCycleMode ? "pointer" : undefined,
+                          background: prevCycleMode ? "#dbeafe" : undefined,
+                        }}>
                         {attrShort(u.attr) || "—"}
+                        {prevCycleMode && prevCycleCounts[u.uid] && (
+                          <div style={{ fontSize:9, color:"#1e40af", fontWeight:700, marginTop:1, lineHeight:1 }}>
+                            {prevCycleCounts[u.uid].D || 0}/{prevCycleCounts[u.uid].E || 0}/{prevCycleCounts[u.uid].N || 0}
+                          </div>
+                        )}
                       </td>
                       {allDays.map(d => {
                         const isRef = refDays.includes(d);
@@ -2629,10 +2751,14 @@ export default function AdminPage() {
                       <div style={{ display:"flex", gap:8, alignItems:"stretch" }}>
                         <input className="finput" type="date" value={cycle.deadline_date}
                           onChange={e => setCycle(p=>({...p,deadline_date:e.target.value}))} style={{ flex:1, minWidth:0 }} />
-                        <input className="finput" type="time" step={60} value={cycle.deadline_time}
-                          onChange={e => setCycle(p=>({...p,deadline_time:e.target.value}))}
-                          style={{ width:100, flex:"0 0 100px" }} />
+                        {/* Native type="time":有時鐘 icon 可點開選,24 小時制取決於瀏覽器/OS locale
+                            (中文 zh-TW 環境預設 24 小時;若你看到 AM/PM,調整 OS 時間格式) */}
+                        <input className="finput deadline-time-input" type="time" step={60}
+                          lang="zh-Hant-TW"
+                          value={cycle.deadline_time}
+                          onChange={e => setCycle(p=>({...p,deadline_time:e.target.value}))} />
                       </div>
+                      <div style={{ fontSize:11, color:"#94a3b8", marginTop:3 }}>時間會以 24 小時制儲存;若顯示 AM/PM 為瀏覽器格式偏好(不影響存值)</div>
                       {cycle.deadline_date && (
                         <div style={{ fontSize:12, color:"#1d4ed8", marginTop:5, fontWeight:500 }}>
                           {fmtDateDay(cycle.deadline_date)} {cycle.deadline_time}
@@ -2813,13 +2939,74 @@ export default function AdminPage() {
                         </div>
                       </label>
 
-                      {/* 規則10：指定休不可覆蓋 */}
+                      {/* 個別護理師偏離次數配額 */}
+                      <div style={{ padding:"8px 10px", background:"#fafafa", border:"1px dashed #e5e7eb", borderRadius:8 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+                          <span style={{ fontSize:13, fontWeight:600, color:"#374151" }}>個別護理師偏離次數</span>
+                          <span style={{ fontSize:11, color:"#9ca3af" }}>覆蓋上面預設值,固定/輪班 attr 皆生效</span>
+                          <button type="button"
+                            onClick={() => {
+                              const taken = new Set(nurseDevOverrides.map(o => o.nurse_uid));
+                              const first = nurseUsers.find(u => !taken.has(u.uid));
+                              if (!first) return;
+                              setNurseDevOverrides(prev => [...prev, { nurse_uid: first.uid, days: 1 }]);
+                            }}
+                            disabled={nurseUsers.filter(u => !nurseDevOverrides.some(o => o.nurse_uid === u.uid)).length === 0}
+                            style={{ padding:"3px 10px", border:"1px solid #16a34a", borderRadius:5, background:"#f0fdf4", color:"#166534", cursor:"pointer", fontSize:12, fontWeight:600, marginLeft:"auto" }}>
+                            + 新增
+                          </button>
+                        </div>
+                        {nurseDevOverrides.length === 0 ? (
+                          <div style={{ fontSize:11, color:"#9ca3af", padding:"4px 0" }}>尚無個別設定,套用「允許固定班偏離」全域設定</div>
+                        ) : nurseDevOverrides.map((o, i) => {
+                          const usedUids = new Set(nurseDevOverrides.filter((_, j) => j !== i).map(x => x.nurse_uid));
+                          const options = nurseUsers.filter(u => !usedUids.has(u.uid));
+                          return (
+                            <div key={i} style={{ display:"flex", alignItems:"center", gap:5, marginBottom:5, flexWrap:"nowrap" }}>
+                              <select value={o.nurse_uid}
+                                onChange={e => setNurseDevOverrides(prev => prev.map((x, j) => j === i ? { ...x, nurse_uid: e.target.value } : x))}
+                                style={{ padding:"3px 6px", border:"1px solid #d1d5db", borderRadius:5, fontSize:12, flex:"0 1 auto", minWidth:0, maxWidth:140 }}>
+                                {options.map(u => (
+                                  <option key={u.uid} value={u.uid}>
+                                    {u.name}({u.attr}){u.halftime ? "·半" : ""}
+                                  </option>
+                                ))}
+                              </select>
+                              <span style={{ fontSize:12, color:"#6b7280", flexShrink:0 }}>偏離</span>
+                              <input type="number" min={0} max={31} value={o.days}
+                                onChange={e => setNurseDevOverrides(prev => prev.map((x, j) => j === i ? { ...x, days: Math.max(0, parseInt(e.target.value || "0", 10) || 0) } : x))}
+                                onFocus={e => e.currentTarget.select()}
+                                className="dev-days-input"
+                                style={{ width:42, padding:"3px 4px", border:"1px solid #d1d5db", borderRadius:5, fontSize:12, textAlign:"center", flexShrink:0 }} />
+                              <span style={{ fontSize:12, color:"#6b7280", flexShrink:0 }}>天</span>
+                              <button type="button"
+                                onClick={() => setNurseDevOverrides(prev => prev.filter((_, j) => j !== i))}
+                                style={{ padding:"1px 6px", border:"1px solid #dc2626", borderRadius:5, background:"#fee2e2", color:"#991b1b", cursor:"pointer", fontSize:12, fontWeight:600, flexShrink:0 }}>
+                                ×
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* H18 應休優先 */}
                       <label className="fcheck">
-                        <input type="checkbox" checked={rulesForm.lock_designated_off}
-                          onChange={e => setRulesForm(p=>({...p,lock_designated_off:e.target.checked}))} />
+                        <input type="checkbox" checked={rulesForm.off_priority ?? true}
+                          onChange={e => setRulesForm(p=>({...p,off_priority:e.target.checked}))} />
                         <div>
-                          <span style={{ fontSize:13 }}>指定休不可被覆蓋</span><br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>啟用時：指定休（OFF）不被生成覆蓋。停用時：指定休可被覆蓋，系統自動補休</span>
+                          <span style={{ fontSize:13 }}>應休優先（公平休假）</span><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>硬規則：若有任何人未達應休天數，則所有人不可超過應休天數。先確保每人拿到應休，才考慮多餘 OFF 分配。全職半職皆套用；V/員/喪等 LEAVE_ADJUST 不算入。可能讓 smooth 版換班變多（H18 硬約束會搶走換班順度的優化空間）</span>
+                        </div>
+                      </label>
+
+                      {/* 應休縮減公平硬約束(方案 C) */}
+                      <label className="fcheck">
+                        <input type="checkbox"
+                          checked={Number(penaltyForm["SLACK_SPREAD_HARD_CAP"] ?? 0) > 0}
+                          onChange={e => setPenaltyForm(p => ({...p, SLACK_SPREAD_HARD_CAP: e.target.checked ? 1 : 0}))} />
+                        <div>
+                          <span style={{ fontSize:13 }}>應休縮減公平硬性(所有人 slack 差 ≤ 1 天)</span><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>硬規則:強制大家的應休縮減天數最多差 1 天(如半職少 2 天 → 全職也要各分擔 1 天)。人力充足時能確保「大家平均分攤」;人力吃緊時可能 INFEASIBLE,此時取消勾選讓 solver 集中縮減某幾人。default 關</span>
                         </div>
                       </label>
 
@@ -2849,19 +3036,26 @@ export default function AdminPage() {
                       { key:"DIRECT_SWITCH_PENALTY",  label:"沒休就換",       def:500,  min:0, max:20000, cat:"順班",     tip:"S8:沒先排 OFF 就直接切換每次罰(必要/多餘都加)" },
                       { key:"REVERSE_SWITCH_PENALTY", label:"反向班換班",     def:500,  min:0, max:20000, cat:"順班",     tip:"E→D、N→E、N→D 不論隔幾天 OFF/半/V/員/喪都額外罰;硬規則已擋未隔 OFF,此為合法反向的軟罰" },
                       { key:"DIST_PENALTY",           label:"班次比例偏差",   def:900,  min:0, max:20000, cat:"比例/公平", tip:"S10:各護理師 D/E/N 天數偏離設定比例每單位罰" },
+                      { key:"RATIO_CAP_DAYS",         label:"H7 單週期比例硬上限(天)", def:2,   min:1, max:10,     cat:"硬規則參數", tip:"H7 硬規則:輪班屬性(DE/DN/EN/DEN)的人,班種計數偏離公式 |Da·Rb − Db·Ra| ≤ 此值 × (Ra+Rb)。default 2(較嚴、10:10 極限 8:12);設 3-4 較寬鬆,人力吃緊時較易排出;設 >5 幾乎不限制" },
+                      { key:"RATIO_CAP_DAYS_DUAL",    label:"H14 雙週期加總比例目標(天)", def:0,   min:0, max:10,     cat:"硬規則參數", tip:"雙週期(上月+本月 committed)加總比例「軟」約束;0=關閉;設 3=兩月加起來比例偏差目標 ≤ 3 天。超出以 H14_SOFT_PENALTY 罰(不 INFEASIBLE):跨 attr(上月出現本月 attr 不允許的班種)會自動 fallback 不套 H14。與 H13 單期硬上限並存" },
+                      { key:"H14_SOFT_PENALTY",       label:"H14 超額每天罰",   def:1500,  min:0, max:20000, cat:"硬規則參數", tip:"H14 雙期目標超出時,每 1 單位差距的罰值。default 1500(比 DIST_PENALTY 900 高,solver 會優先滿足 H14);設 0=完全不罰(等同關閉 H14)" },
+                      { key:"SLACK_MAX_PER_NURSE",    label:"每人少休上限(天)", def:2,     min:0, max:14,    cat:"硬規則參數", tip:"每位護理師可縮減應休天數的上限。default 2(每人最多少 2 天);人力嚴重不足時可拉高至 5-7 讓生成不失敗(即使代價是縮更多)。設 0=不可縮減(強制休滿,人力不足時 INFEASIBLE)。與「應休縮減公平硬性」搭配時,拉高此值可降低 INFEASIBLE 風險" },
+                      { key:"SEG_HARD_CAP_2",         label:"S11 段數上限(2種)", def:5,   min:0, max:20,     cat:"硬規則參數", tip:"S11 硬規則:輪班2種(DE/DN/EN)每人整週期「所有班種段數加總」上限;0=關閉此硬規則。default 5(嚴),過緊會 INFEASIBLE 可調 6-8。半職、固定班不套用" },
+                      { key:"SEG_HARD_CAP_3",         label:"S11 段數上限(3種)", def:6,   min:0, max:20,     cat:"硬規則參數", tip:"S11 硬規則:輪班DEN 每人整週期「所有班種段數加總」上限;0=關閉。default 6,過緊會 INFEASIBLE 可調 7-10。半職、固定班不套用" },
                       { key:"SKILL_SPREAD_PENALTY",   label:"應休縮減公平",   def:400,  min:0, max:20000, cat:"比例/公平", tip:"S6:各護理師縮減幅度差距罰(讓縮減平均分攤)" },
                       { key:"ISOLATED_WORK_PENALTY",  label:"孤立上班日",     def:750,  min:0, max:20000, cat:"軟規則",   tip:"S9:OFF-上班-OFF 只出來上一天罰" },
                       { key:"FIX_PENALTY",            label:"固定班偏離",     def:500,  min:0, max:20000, cat:"軟規則",   tip:"S7:固定班偏離其班種每格罰" },
                       { key:"WEEKLY_OFF_OVER_PENALTY",label:"週OFF凸性",      def:500,  min:0, max:20000, cat:"軟規則",   tip:"S3:全職每週 OFF 超過 2 天罰(凸性 3 層)" },
                       { key:"HT_ISOLATED_MULT",       label:"半職孤立日倍率", def:2.5,  min:1, max:10,    step:0.1, cat:"軟規則", tip:"半職的孤立上班日 penalty × 倍率(半職工作天少易被排孤立日)" },
-                      { key:"ISOLATED_MAX_TOTAL",     label:"孤立日總數硬上限",def:0,   min:0, max:100,   cat:"軟規則",   tip:"全體護理師的 OFF-上班-OFF 總數硬上限;0=不限制;設 10 就是全體 ≤10 天" },
-                      { key:"ISO_MAX_PER_NURSE",      label:"全職孤立日硬上限",def:1,   min:0, max:10,    cat:"軟規則",   tip:"H17:每位全職護理師整週期的孤立日 ≤ 此值;0=不限制;預設 1" },
-                      { key:"ISO_MAX_PER_NURSE_HT",   label:"半職孤立日硬上限",def:2,   min:0, max:10,    cat:"軟規則",   tip:"H17:每位半職護理師整週期的孤立日 ≤ 此值;0=不限制;預設 2(密度稀,給多 1 個 buffer)" },
-                      { key:"SHORT_BLOCK_PENALTY",    label:"短塊(1-2天)罰",   def:2000, min:0, max:20000, cat:"塊狀",     tip:"S8:同種班連續 1-2 天每塊罰(D/E/N 各自算);全職套用" },
+                      { key:"ISOLATED_MAX_TOTAL",     label:"孤立日總數硬上限",def:0,   min:0, max:100,   cat:"硬規則參數", tip:"全體護理師的 OFF-上班-OFF 總數硬上限;0=不限制;設 10 就是全體 ≤10 天" },
+                      { key:"ISO_MAX_PER_NURSE",      label:"全職孤立日硬上限",def:1,   min:0, max:10,    cat:"硬規則參數", tip:"H17:每位全職護理師整週期的孤立日 ≤ 此值;0=不限制;預設 1" },
+                      { key:"ISO_MAX_PER_NURSE_HT",   label:"半職孤立日硬上限",def:2,   min:0, max:10,    cat:"硬規則參數", tip:"H17:每位半職護理師整週期的孤立日 ≤ 此值;0=不限制;預設 2(密度稀,給多 1 個 buffer)" },
+                      { key:"ULTRA_SHORT_BLOCK_PENALTY", label:"超短塊(1天)罰",  def:3000, min:0, max:20000, cat:"塊狀",     tip:"S8:同種班連續只 1 天(前後都不是同班)每塊罰;比 2 天塊更痛;全職套用" },
+                      { key:"SHORT_BLOCK_PENALTY",    label:"短塊(2天)罰",     def:500,  min:0, max:20000, cat:"塊狀",     tip:"S8:同種班連續 2 天每塊罰;比 1 天塊輕;全職套用" },
                       { key:"MID_BLOCK_REWARD",       label:"中塊(3-4天)獎勵", def:500,  min:0, max:20000, cat:"塊狀",     tip:"S9:同種班連續 3-4 天每塊獎勵(建模時取負);讓 solver 主動堆中塊" },
                       { key:"LONG_BLOCK_PENALTY",     label:"長塊(≥5天)罰",    def:800,  min:0, max:20000, cat:"塊狀",     tip:"S10:同種班連續 ≥5 天每塊罰(疲勞管理)" },
                       { key:"TWO_OFF_EXTRA_REWARD",   label:"多連2OFF獎勵",    def:500,  min:0, max:20000, cat:"塊狀",     tip:"H16 額外:每多一次連續 2 天 OFF pair 獎勵(OFF-OFF-OFF 算 2 對,鼓勵 OFF 塊狀化)" },
-                      { key:"SEGMENT_PENALTY",        label:"班種段數(S11)",   def:3000, min:0, max:20000, cat:"塊狀",     tip:"S11:每人每種班 D/E/N 段數超過 1 每多 1 段罰(OFF/LA 穿透);讓每種班集中在月內一段" },
+                      { key:"SEGMENT_PENALTY",        label:"班種段數(S11)",   def:5000, min:0, max:20000, cat:"塊狀",     tip:"S11:每人每種班 D/E/N 段數超過 1 每多 1 段罰(OFF/LA 穿透);讓每種班集中在月內一段" },
                       { key:"OVER_OFF_PENALTY_HALF",  label:"半職超休罰",     def:500,  min:0, max:20000, cat:"軟規則",   tip:"半職 OFF 天數超過應休 quota 每天罰(通常低於全職,鼓勵 solver 給半職多 OFF)" },
                       { key:"OVER_OFF_PENALTY_FULL",  label:"全職超休罰",     def:1500, min:0, max:20000, cat:"軟規則",   tip:"全職 OFF 天數超過應休 quota 每天罰(比半職重 → 多餘 OFF 優先給半職填滿)" },
                       { key:"SLACK_PENALTY_HALF",     label:"半職縮減應休罰", def:1000, min:0, max:20000, cat:"軟規則",   tip:"半職使用 off_slack(未達應休)每天罰(拉高 → 強逼給半職滿 OFF,配 OVER_OFF_HALF 低)" },
@@ -2869,11 +3063,14 @@ export default function AdminPage() {
                       { key:"MENTOR_FOLLOW_PENALTY",  label:"新人跟隨導師",   def:5000, min:0, max:20000, cat:"新人",     tip:"新人每天與導師不同班每格罰(要 ≥ EXCESS_SWITCH 才會真的跟)" },
                       { key:"SMOOTH_SWITCH_MULT",     label:"smooth 換班倍率",def:2,    min:1, max:5,     step:0.1, cat:"版本倍率", tip:"順班優先版的換班懲罰乘倍率(1.5~2.5 為佳)" },
                       { key:"FAIR_DIST_MULT",         label:"fair 比例倍率",  def:2,    min:1, max:5,     step:0.1, cat:"版本倍率", tip:"公平優先版的比例懲罰乘倍率" },
-                      { key:"MAIN_SOLVE_SECONDS",     label:"求解時限(秒)",   def:90,   min:30,max:600,   cat:"求解器",   tip:"CP-SAT 每個 profile 最多跑幾秒才停(90/180 各有優缺)" },
+                      { key:"MAIN_SOLVE_SECONDS",     label:"求解時限(秒)",   def:180,  min:30,max:600,   cat:"求解器",   tip:"CP-SAT 每個 profile 最多跑幾秒才停(90/180 各有優缺)。可被 profile 專屬設定覆蓋" },
+                      { key:"MAIN_SOLVE_SECONDS_BALANCED", label:"balanced 求解秒數", def:120, min:0, max:600, cat:"求解器", tip:"平衡版專屬。留 0 用通用值。因 balanced 較常走 seed fallback,建議 100-120 避 Railway 300s 上限" },
+                      { key:"MAIN_SOLVE_SECONDS_SMOOTH", label:"smooth 求解秒數", def:0, min:0, max:600, cat:"求解器", tip:"順班優先版專屬。留 0 用通用值" },
+                      { key:"MAIN_SOLVE_SECONDS_FAIR", label:"fair 求解秒數", def:0, min:0, max:600, cat:"求解器", tip:"公平優先版專屬。留 0 用通用值" },
                       { key:"MAIN_SOLVE_WORKERS",     label:"求解 CPU 數",    def:4,    min:1, max:16,    cat:"求解器",   tip:"CP-SAT 平行執行緒數(Hobby 給的 vCPU 越多可越大)" },
                       { key:"LOCAL_RESOLVE_ENABLED",  label:"局部re-solve開關",def:1,   min:0, max:1,     cat:"求解器",   tip:"主 solve 後 gap > 閾值時,挑分數最高的護理師固定其他人再 solve,突破 local minima;0=關閉,1=啟用" },
                       { key:"LOCAL_RESOLVE_SECONDS",  label:"局部re-solve時限",def:60,  min:10,max:600,   cat:"求解器",   tip:"局部 re-solve 最多跑幾秒" },
-                      { key:"LOCAL_RESOLVE_HOTSPOTS", label:"熱點護理師人數",  def:3,   min:1, max:10,    cat:"求解器",   tip:"每次局部 re-solve 挑分數最高的 N 位護理師 optimize,其他人固定當前解" },
+                      { key:"LOCAL_RESOLVE_HOTSPOTS", label:"熱點護理師人數",  def:5,   min:1, max:10,    cat:"求解器",   tip:"每次局部 re-solve 挑分數最高的 N 位護理師 optimize,其他人固定當前解" },
                       { key:"LOCAL_RESOLVE_MIN_GAP",  label:"觸發gap閾值(%)", def:20,  min:0, max:200,   cat:"求解器",   tip:"主 solve 完成後 gap 超過此值才啟動局部 re-solve;過低會頻繁觸發浪費時間" },
                     ];
                     const PRESET_ALPHA: Record<string, number> = {
@@ -3123,7 +3320,7 @@ export default function AdminPage() {
             : "尚未設定行政類上班班別";
           const HARD: Row[] = [
             { no:"H1",  title:"每班每日恰好符合設定人數", desc:"預設 D/E/N 各 3 人（可覆蓋，見特殊日期）；行政班、新人不計入。湊不齊會生成失敗" },
-            { no:"H2",  title:"已填班別一律保留", desc:"含未確認的預填，不覆蓋、只填空白格" },
+            { no:"H2",  title:"已填班別一律保留", desc:"任何已填的格子(不論誰填的、什麼班種)都不會被生成覆蓋、只填空白格。涵蓋:指定休 OFF、預填 D/E/N、確認班、未確認預填、行政班(會/公/書)、放假調整類(V/員/喪/延休/補休/調移)等所有非空格" },
             { no:"H3",  title:"反向班禁止", desc:"E→D 隔 1 天休；N→E 隔 1 天休；N→D 隔 2 天休。固定啟用、不可關閉" },
             { no:"H4",  title:"每週 D/E/N 至多兩種班別", desc:"預填出現班屬外班別時，該週自動改為「例外+一種原班」" },
             { no:"H5",  title:"每週至少 1 天休", desc:"底線，恆常生效（OFF 或半）" },
@@ -3134,21 +3331,24 @@ export default function AdminPage() {
             { no:"H10", title:"輪班屬性限制 + 固定班偏離", desc:"輪班DE 只排 D/E 等；勾「允許固定班偏離」＝最多 2 格，未勾＝0 格。公平優先版一律 0 格" },
             { no:"H11", title:"放假/調整類最高優先鎖定", desc:H11_DESC },
             { no:"H12", title:"半職視同應休", desc:"計入應休天數" },
-            { no:"H13", title:"班次比例硬上限 ±2 天", desc:"各班種天數偏離理想比例最多 ±2 天（例 10:10 極限 8:12，不會 7:13）。全職半職皆同" },
-            { no:"H14", title:"行政類上班：視同 D、不計人力", desc:H14_DESC },
-            { no:"H15", title:"新人不計臨床人力", desc:"新人=在學習的正式員工：照所有規則排、但 H1/H7/H8 排除。跟隨導師見 S6" },
-            { no:"H16", title:"每週期至少一次連續 2 天 OFF", desc:`全職硬規則:週期內至少存在一次「OFF-OFF」(可跨週,如週日→週一 OK;僅不跨週期);半職不套用。V/員/喪等 LEAVE_ADJUST 天不算入配對。額外獎勵:每多一次連 2 OFF -${Number(penaltyForm["TWO_OFF_EXTRA_REWARD"] ?? 500)}(鼓勵 OFF 塊狀化,OFF-OFF-OFF 算 2 對)` },
-            { no:"H17", title:`每人孤立日硬上限(全職 ≤${Number(penaltyForm["ISO_MAX_PER_NURSE"] ?? 1)}、半職 ≤${Number(penaltyForm["ISO_MAX_PER_NURSE_HT"] ?? 2)})`, desc:`每人整週期內「OFF-上班-OFF」孤立上班日硬上限。半職給多 buffer(工作天少、密度稀)。與 S2 軟罰疊加,硬性擋掉過多` },
+            { no:"H13", title:`單週期比例硬上限 ±${Number(penaltyForm["RATIO_CAP_DAYS"] ?? 2)} 天`, desc:`本週期內各班種天數偏離理想比例最多 ±${Number(penaltyForm["RATIO_CAP_DAYS"] ?? 2)} 天（例 10:10 極限 ${10-Number(penaltyForm["RATIO_CAP_DAYS"] ?? 2)}:${10+Number(penaltyForm["RATIO_CAP_DAYS"] ?? 2)}）。全職半職皆同` },
+            { no:"H14", title:Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 0) > 0 ? `雙週期加總比例目標 ±${Number(penaltyForm["RATIO_CAP_DAYS_DUAL"])} 天(軟)` : "雙週期加總比例目標（未啟用）", desc:Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 0) > 0 ? `本月+上月加總比例偏差目標 ±${Number(penaltyForm["RATIO_CAP_DAYS_DUAL"])} 天:solver 盡量滿足,超出以 H14_SOFT_PENALTY (現值 ${Number(penaltyForm["H14_SOFT_PENALTY"] ?? 1500)}) 每天罰。跨 attr(上月出現本月 attr 不允許的班種)自動不套 H14,避免 INFEASIBLE。與 H13 並存(H13 仍是硬上限)` : "設為 0（預設）= 關閉。設 >0 才啟用（進階調參 → 硬規則參數 → H14 雙週期加總比例目標）" },
+            { no:"H15", title:"行政類上班：視同 D、不計人力", desc:H14_DESC },
+            { no:"H16", title:"新人不計臨床人力", desc:"新人=在學習的正式員工：照所有規則排、但 H1/H7/H8 排除。跟隨導師見 S6" },
+            { no:"H17", title:"每週期至少一次連續 2 天 OFF", desc:`全職硬規則:週期內至少存在一次「OFF-OFF」(可跨週,如週日→週一 OK;僅不跨週期);半職不套用。V/員/喪等 LEAVE_ADJUST 天不算入配對。額外獎勵:每多一次連 2 OFF -${Number(penaltyForm["TWO_OFF_EXTRA_REWARD"] ?? 500)}(鼓勵 OFF 塊狀化,OFF-OFF-OFF 算 2 對)` },
+            { no:"H18", title:`每人孤立日硬上限(全職 ≤${Number(penaltyForm["ISO_MAX_PER_NURSE"] ?? 1)}、半職 ≤${Number(penaltyForm["ISO_MAX_PER_NURSE_HT"] ?? 2)})`, desc:`每人整週期內「OFF-上班-OFF」孤立上班日硬上限。半職給多 buffer(工作天少、密度稀)。與 S2 軟罰疊加,硬性擋掉過多` },
+            { no:"H19", title:"應休優先(公平休假)", desc:"若有任何人未達應休天數(slack>0),則所有人不可超過應休天數(over=0)。先確保每人拿到應休,再考慮多餘 OFF 分配。全職半職皆套用;V/員/喪等 LEAVE_ADJUST 不算入。可在「排班規則 → 休假規則」勾選開關(預設開啟)" },
+            { no:"H20", title:`班種段數硬上限(輪班2種 ≤${Number(penaltyForm["SEG_HARD_CAP_2"] ?? 5)}、輪班DEN ≤${Number(penaltyForm["SEG_HARD_CAP_3"] ?? 6)})`, desc:`S11 硬規則:每人整週期「所有班種段數加總」上限。段=同種班連續(OFF/半/V/員/喪 穿透),不同班切換算新段。半職、固定班不套用;可在「進階調參 → 硬規則參數」調整或設 0 關閉。過緊會 INFEASIBLE` },
           ];
           const QUOTA: Row[] = [
             { no:"R1", title:"應休天數公式", desc:"全職 = 8 + 國定假日（最多 13）；半職 = 28 − ⌊(160 − 國定×8)÷2÷8⌋（可上天數捨去）" },
             { no:"R2", title:"應休下限為軟約束", desc:`人力不足時最多縮減 2 天;縮減每天罰:半職 +${Number(penaltyForm["SLACK_PENALTY_HALF"] ?? 1000)}、全職 +${Number(penaltyForm["SLACK_PENALTY_FULL"] ?? 200)}(強逼填滿半職);超休每天罰:半職 +${Number(penaltyForm["OVER_OFF_PENALTY_HALF"] ?? 500)}、全職 +${Number(penaltyForm["OVER_OFF_PENALTY_FULL"] ?? 1500)}(多餘 OFF 優先給半職);縮減不公另扣 ${Number(penaltyForm["SKILL_SPREAD_PENALTY"] ?? 400)}` },
           ];
           const LEAVE: Row[] = [
-            { no:"L1", title:"指定休不可覆蓋", desc:"管理員標記的 OFF 不被生成取代" },
-            { no:"L2", title:"第一天鎖定", desc:"週期第一天已有記錄時不被覆蓋" },
-            { no:"L3", title:"自動休連續上限 N 天", desc:"系統排的休假不超過 N 天連休（指定休可切斷、放假/調整類也自動中斷；半職不受限）" },
-            { no:"L4", title:"連續 OFF 總上限", desc:"指定休+自動休合計連休不得超過設定值（放假/調整類自動中斷；半職不受限）" },
+            { no:"L1", title:"第一天鎖定", desc:"週期第一天已有記錄時不被覆蓋" },
+            { no:"L2", title:"自動休連續上限 N 天", desc:"系統排的休假不超過 N 天連休（指定休可切斷、放假/調整類也自動中斷；半職不受限）" },
+            { no:"L3", title:"連續 OFF 總上限", desc:"指定休+自動休合計連休不得超過設定值（放假/調整類自動中斷；半職不受限）" },
+            { no:"L4", title:`應休縮減公平硬性${Number(penaltyForm["SLACK_SPREAD_HARD_CAP"] ?? 0) > 0 ? "（啟用）" : "（未啟用）"}`, desc:Number(penaltyForm["SLACK_SPREAD_HARD_CAP"] ?? 0) > 0 ? "硬規則:所有人的應休縮減天數(slack)最多差 1 天。若無法達成會 INFEASIBLE。在「休假規則」勾選開關" : "設為關閉(預設)。啟用時強制大家平均分攤縮減,人力充足時能確保公平" },
           ];
           // 動態讀取當下懲罰值(進階調參 penaltyForm > default);與 [main.py:pen()] 對應
           const P = (key: string, def: number) => Number(penaltyForm[key] ?? def);
@@ -3165,7 +3365,7 @@ export default function AdminPage() {
           const _shortBlk = P("SHORT_BLOCK_PENALTY", 2000);
           const _midRew = P("MID_BLOCK_REWARD", 500);
           const _longBlk = P("LONG_BLOCK_PENALTY", 800);
-          const _seg = P("SEGMENT_PENALTY", 3000);
+          const _seg = P("SEGMENT_PENALTY", 5000);
           const SOFT: (Row & { penalty?: string })[] = [
             { no:"S1", title:"順班", desc:`只罰「多餘換班」(+${_excess})+「沒休就換」(+${_direct})+「反向班換班」(+${_rev},E→D、N→E、N→D 即使合法隔OFF 也罰);輪班必要換班不罰。順班優先版(smooth)全部乘 SWITCH_MULT(預設 1.5),搭配 S8/S9/S10/S11 同步加乘` },
             { no:"S2", title:"避免孤立上班日", desc:`OFF-上班-OFF(只出來上一天班);半職 ×${_isoHt} 加重。全職硬上限 ≤1/人(見 H17);仍保留軟罰疊加`, penalty:`+${_iso}` },
@@ -3192,10 +3392,10 @@ export default function AdminPage() {
             { k:"一例一休",             v:"每週 ≥2 天休（H6）" },
             { k:"允許固定班偏離",       v:"勾＝最多 2 格、未勾＝0（H10）" },
             { k:"每人休假上限",         v:"預班可填的總天數上限（F2）" },
-            { k:"自動休每週上限",       v:"系統排的連休天數（L3）" },
-            { k:"含指定休每週上限",     v:"指定休 + 自動休合計（L4）" },
-            { k:"第一天鎖定",           v:"週期首日既有記錄不被覆蓋（L2）" },
-            { k:"指定休不可覆蓋",       v:"管理員標的 OFF 不被取代（L1）" },
+            { k:"自動休每週上限",       v:"系統排的連休天數（L2）" },
+            { k:"含指定休每週上限",     v:"指定休 + 自動休合計（L3）" },
+            { k:"第一天鎖定",           v:"週期首日既有記錄不被覆蓋（L1）" },
+            { k:"應休縮減公平硬性",     v:"所有人 slack 差 ≤ 1（L4,default 關）" },
             { k:"首個週末不同時休",     v:"前端預班硬擋（F1）" },
             { k:"輪班比例",             v:"各屬性 D/E/N 比例，可個別覆蓋（S4）" },
           ];
@@ -3270,6 +3470,59 @@ export default function AdminPage() {
             </div>
           );
 
+          const dualRatioTable = (
+            <div style={{
+              margin:"0 18px 16px", padding:"12px 14px",
+              background:"#fffbeb", border:"1px solid #fde68a", borderRadius:8,
+            }}>
+              <div style={{ fontSize:12.5, fontWeight:700, color:"#78350f", marginBottom:8 }}>
+                H13 / H14 單期・雙期比例硬上限 推薦組合
+              </div>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12.5 }}>
+                  <thead>
+                    <tr style={{ background:"#fef3c7" }}>
+                      <th style={{ padding:"6px 10px", textAlign:"left", color:"#78350f", fontWeight:700, width:110 }}>單期／雙期</th>
+                      <th style={{ padding:"6px 10px", textAlign:"left", color:"#78350f", fontWeight:700, width:110 }}>定位</th>
+                      <th style={{ padding:"6px 10px", textAlign:"left", color:"#78350f", fontWeight:700 }}>說明</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{ padding:"6px 10px", color:"#374151", fontWeight:700 }}>5 / 3</td>
+                      <td style={{ padding:"6px 10px", color:"#059669", fontWeight:700 }}>最均衡</td>
+                      <td style={{ padding:"6px 10px", color:"#374151" }}>單期給彈性、雙期把兩月加總拉回;推薦預設</td>
+                    </tr>
+                    <tr style={{ borderTop:"1px solid #fde68a" }}>
+                      <td style={{ padding:"6px 10px", color:"#374151", fontWeight:700 }}>4 / 3</td>
+                      <td style={{ padding:"6px 10px", color:"#0369a1", fontWeight:700 }}>重視單期</td>
+                      <td style={{ padding:"6px 10px", color:"#374151" }}>如果特別重視「每個月自己就要平衡」,單期收緊到 4</td>
+                    </tr>
+                    <tr style={{ borderTop:"1px solid #fde68a" }}>
+                      <td style={{ padding:"6px 10px", color:"#374151", fontWeight:700 }}>6 / 3</td>
+                      <td style={{ padding:"6px 10px", color:"#a16207", fontWeight:700 }}>單期較寬</td>
+                      <td style={{ padding:"6px 10px", color:"#374151" }}>如果願意接受單期較極端(換取更好可行性),靠雙期收斂</td>
+                    </tr>
+                    <tr style={{ borderTop:"1px solid #fde68a" }}>
+                      <td style={{ padding:"6px 10px", color:"#7c3aed", fontWeight:700 }}>5 / 2</td>
+                      <td style={{ padding:"6px 10px", color:"#7c3aed", fontWeight:700 }}>公平較強</td>
+                      <td style={{ padding:"6px 10px", color:"#374151" }}>雙期收到 2,長期公平性更強;可行空間縮小,較易 INFEASIBLE</td>
+                    </tr>
+                    <tr style={{ borderTop:"1px solid #fde68a" }}>
+                      <td style={{ padding:"6px 10px", color:"#dc2626", fontWeight:700 }}>4 / 2</td>
+                      <td style={{ padding:"6px 10px", color:"#dc2626", fontWeight:700 }}>最公平</td>
+                      <td style={{ padding:"6px 10px", color:"#374151" }}>單期雙期都收緊到極限,最公平;也很容易把程式逼瘋(INFEASIBLE 頻繁)</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ fontSize:11.5, color:"#78350f", marginTop:8, lineHeight:1.7 }}>
+                單期 = H13 <b>RATIO_CAP_DAYS</b>(現值 {Number(penaltyForm["RATIO_CAP_DAYS"] ?? 2)}) / 雙期 = H14 <b>RATIO_CAP_DAYS_DUAL</b>(現值 {Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 0)},0 = 關閉)<br/>
+                可於「進階調參 → 硬規則參數」調整。雙期需上月已有 committed 資料;無資料的人自動只套 H13。
+              </div>
+            </div>
+          );
+
           const segmentTable = (
             <div style={{
               margin:"0 18px 16px", padding:"12px 14px",
@@ -3334,7 +3587,7 @@ export default function AdminPage() {
                 想調整「一例一休/固定班偏離/連續上班上限」等，請至上方「<b>排班規則</b>」分頁。
               </div>
 
-              {sectionCard("hard",  "硬規則",   "違反即生成失敗（會提示衝突原因）", HARD)}
+              {sectionCard("hard",  "硬規則",   "違反即生成失敗（會提示衝突原因）", HARD, dualRatioTable)}
               {sectionCard("quota", "應休天數", "計算公式與縮減上限", QUOTA)}
               {sectionCard("leave", "休假規則", "OFF 鎖定與連休上限", LEAVE)}
               {sectionCard("soft",  "軟規則",   "人力允許時盡量遵守；每項有懲罰值", SOFT, segmentTable)}
@@ -3541,15 +3794,29 @@ export default function AdminPage() {
             setGenVersions({}); setSelectedProfile(null);
             setConfirmGenerate(false);
             const results: Partial<Record<GenProfileKey, GenVersion>> = {};
+            const currentHash = computeRulesHash();
             for (const p of GEN_PROFILES) {
               if (genCanceledRef.current) break;
               const controller = new AbortController();
               genAbortRef.current = controller;
               try {
-                const hint = lastGenSchedules[p.key];   // 暖啟動：本 profile 上次的解
+                // 暖啟動優先取「歷史最佳解」(同規則 hash 才用),沒有才 fallback 上次的解
+                const best = bestGen[p.key];
+                const hint = (best && best.rules_hash === currentHash && best.schedules)
+                  ? best.schedules
+                  : lastGenSchedules[p.key];
                 const body = hint ? { hint_schedules: hint } : {};
+                // seed 選擇:深度輪替(考慮已 tried 失敗的 seeds);random_search 依 profile 各自 checkbox
+                const cachedSeed = pickSeedForProfile(p.key, currentHash);
+                const rs = randomExplore[p.key] ? 1 : 0;
+                const params = new URLSearchParams({
+                  overwrite_confirmed: "false",
+                  profile: p.key,
+                  ...(cachedSeed ? { seed: String(cachedSeed) } : {}),
+                  ...(rs ? { random_search: "1" } : {}),
+                });
                 const { data } = await api.post(
-                  `/schedule/generate?overwrite_confirmed=false&profile=${p.key}`,
+                  `/schedule/generate?${params.toString()}`,
                   body,
                   { signal: controller.signal },
                 );
@@ -3587,6 +3854,48 @@ export default function AdminPage() {
               }
             }
             setLastGenSchedules(nextHints);
+            // 更新「歷史最佳解」:僅 FEASIBLE(非救援解)且分數更好時才覆蓋
+            const nextBest = { ...bestGen };
+            const nextBestSeed = { ...bestSeedByProfile };
+            for (const p of GEN_PROFILES) {
+              const v = results[p.key];
+              if (!v || v.error || !v.schedules || !Object.keys(v.schedules).length) continue;
+              const m = v.metrics ?? null;
+              const rescued = m?.rescued ?? false;
+              const obj = m?.objective_value ?? null;
+              if (rescued || obj === null) continue;   // 救援解或無 obj 不當 best
+              const cur = nextBest[p.key];
+              const same_hash = cur && cur.rules_hash === currentHash;
+              // 更新條件:規則變過(hash 不同)、或無現有 best、或新解更好
+              if (!cur || !same_hash || (cur.objective !== null && obj < cur.objective)) {
+                nextBest[p.key] = { schedules: v.schedules, objective: obj, rules_hash: currentHash };
+              }
+              // 記住這次用的 seed(下次生成優先用它)
+              const usedSeed = (m as any)?.used_seed;
+              if (typeof usedSeed === "number" && usedSeed > 0) {
+                nextBestSeed[p.key] = usedSeed;
+              }
+            }
+            persistBestGen(nextBest);
+            persistBestSeed(nextBestSeed);
+            // 深度輪替:成功 → 清 triedSeeds(重置);失敗 → 加該 profile 首選 seed 到 triedSeeds
+            const nextFail = { ...seedFailState };
+            for (const p of GEN_PROFILES) {
+              const v = results[p.key];
+              const usedSeed = ((v?.metrics as any)?.used_seed) ?? 0;
+              if (v && !v.error && v.schedules && Object.keys(v.schedules).length && !(v.metrics as any)?.rescued) {
+                // 成功且非救援 → 清除該 profile 的 tried 記錄(下次從最佳 seed 開始)
+                delete nextFail[p.key];
+              } else if (usedSeed > 0) {
+                // 失敗或救援 → 加該 seed 到 triedSeeds
+                const cur = nextFail[p.key];
+                const same_hash = cur && cur.rules_hash === currentHash;
+                const tried = same_hash ? [...cur.triedSeeds] : [];
+                if (!tried.includes(usedSeed)) tried.push(usedSeed);
+                nextFail[p.key] = { rules_hash: currentHash, triedSeeds: tried };
+              }
+            }
+            persistSeedFail(nextFail);
             const okCount = Object.values(results).filter(v => v && !v.error).length;
             if (genCanceledRef.current) {
               setGenResult(okCount === 0
@@ -3610,6 +3919,8 @@ export default function AdminPage() {
               setHasGenerated(true);
               setGenVersions({}); setSelectedProfile(null);
               setLastGenSchedules({});   // 匯入後暖啟動記憶失效（所有 cell 已鎖定，不再需要 hint）
+              persistBestGen({});         // 歷史最佳解也清空(匯入後模型完全鎖死,舊 best 無意義)
+              // 匯入後 best seed 保留(seed 選擇跟模型狀態無關,下次生成新月份仍可用)
               fetchSchedule();
             } catch (err: any) {
               setCommitResult("✗ " + (err.response?.data?.detail ?? err.message ?? "匯入失敗"));
@@ -3709,6 +4020,187 @@ export default function AdminPage() {
                     </div>
                   </div>
 
+                  {/* ── 上月資料異常偵測 (H14 雙週期軟目標相關) */}
+                  {(() => {
+                    const dualCap = Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 0);
+                    const h14Pen = Number(penaltyForm["H14_SOFT_PENALTY"] ?? 1500);
+                    const prevKeys = Object.keys(prevCycleCounts);
+                    if (prevKeys.length === 0) return null;
+
+                    const rOv = (uid: string, generic: string): number | undefined => {
+                      const ov = ratioOverrides.find(o => o.nurse_uid === uid);
+                      return ov?.ratio?.[generic];
+                    };
+                    const rGet = (uid: string, attrKey: string, generic: string): number => {
+                      const v = rOv(uid, generic);
+                      return Math.max(1, v ?? (ratioForm as any)[attrKey] ?? 1);
+                    };
+
+                    // 對照 backend SHIFT_ALLOWED
+                    const attrAllowed = (attr: string): Set<string> => {
+                      if (attr === "固定D") return new Set(["D"]);
+                      if (attr === "固定E") return new Set(["E"]);
+                      if (attr === "固定N") return new Set(["N"]);
+                      if (attr === "輪班DE") return new Set(["D","E"]);
+                      if (attr === "輪班DN") return new Set(["D","N"]);
+                      if (attr === "輪班EN") return new Set(["E","N"]);
+                      return new Set(["D","E","N"]);
+                    };
+
+                    type Sev = "fallback" | "over" | "heavy" | "info";
+                    type Anomaly = { uid: string; name: string; attr: string; pc: {D:number;E:number;N:number}; issues: {text:string; sev:Sev}[] };
+                    const anomalies: Anomaly[] = [];
+
+                    for (const u of schedulableNurses) {
+                      const raw = prevCycleCounts[u.uid];
+                      if (!raw) continue;
+                      const pc = { D: raw.D || 0, E: raw.E || 0, N: raw.N || 0 };
+                      if (pc.D === 0 && pc.E === 0 && pc.N === 0) continue;
+                      const attr = u.attr || "輪班DEN";
+                      const issues: {text:string; sev:Sev}[] = [];
+
+                      // 1. 跨 attr 偵測 → backend 走 C1 智慧補償(對共同班種加軟目標)
+                      const allowed = attrAllowed(attr);
+                      const prevPresent: string[] = [];
+                      if (pc.D > 0) prevPresent.push("D");
+                      if (pc.E > 0) prevPresent.push("E");
+                      if (pc.N > 0) prevPresent.push("N");
+                      const crossShifts = prevPresent.filter(s => !allowed.has(s));
+                      if (crossShifts.length > 0) {
+                        const commonShifts = prevPresent.filter(s => allowed.has(s));
+                        // 估算 C1 補償目標(和 backend 同公式:上月假設均分,本月同 attr 允許班種均分)
+                        const prevTotal = pc.D + pc.E + pc.N;
+                        const nPrev = Math.max(1, prevPresent.length);
+                        const nThis = Math.max(1, [...allowed].filter(s => s === "D" || s === "E" || s === "N").length);
+                        const thisTotal = dPeriod;  // 粗估本月上班天數
+                        const targets: string[] = [];
+                        for (const s of commonShifts) {
+                          const prevShould = prevTotal / nPrev;
+                          const prevActual = pc[s as "D"|"E"|"N"];
+                          const deficit = prevShould - prevActual;   // 正=欠
+                          const thisShould = thisTotal / nThis;
+                          const target = Math.max(0, Math.min(thisTotal, Math.round(thisShould + deficit)));
+                          targets.push(`${s}→本月目標 ${target} 天(上月${prevActual < prevShould ? "欠" : "超"} ${Math.abs(deficit).toFixed(1)})`);
+                        }
+                        if (dualCap > 0 && commonShifts.length > 0) {
+                          issues.push({
+                            text: `跨 attr → C1 智慧補償:上月 [${crossShifts.map(s => `${s}=${pc[s as "D"|"E"|"N"]}`).join(",")}] 本月不允許;共同班種 [${commonShifts.join(",")}] 會補償 → ${targets.join(" · ")}`,
+                            sev: "fallback",
+                          });
+                        } else {
+                          issues.push({
+                            text: `跨 attr:上月有 ${crossShifts.map(s => `${s}=${pc[s as "D"|"E"|"N"]}`).join(", ")} 本月不允許${dualCap === 0 ? "(H14 已關,不補償)" : "(無共同班種可補償)"}`,
+                            sev: "fallback",
+                          });
+                        }
+                      }
+
+                      // 2. pair 目標 (只在 H14 啟用且非固定班且非跨 attr 時)
+                      if (dualCap > 0 && !attr.startsWith("固定") && crossShifts.length === 0) {
+                        type Pair = { a: "D"|"E"|"N"; b: "D"|"E"|"N"; ra: number; rb: number; label: string };
+                        const pairs: Pair[] = [];
+                        if (attr === "輪班DE") pairs.push({a:"D",b:"E",ra:rGet(u.uid,"de_d","D"),rb:rGet(u.uid,"de_e","E"),label:"D:E"});
+                        else if (attr === "輪班DN") pairs.push({a:"D",b:"N",ra:rGet(u.uid,"dn_d","D"),rb:rGet(u.uid,"dn_n","N"),label:"D:N"});
+                        else if (attr === "輪班EN") pairs.push({a:"E",b:"N",ra:rGet(u.uid,"en_e","E"),rb:rGet(u.uid,"en_n","N"),label:"E:N"});
+                        else if (attr === "輪班DEN") {
+                          const rd = rGet(u.uid,"den_d","D"), re = rGet(u.uid,"den_e","E"), rn = rGet(u.uid,"den_n","N");
+                          pairs.push({a:"D",b:"E",ra:rd,rb:re,label:"D:E"});
+                          pairs.push({a:"D",b:"N",ra:rd,rb:rn,label:"D:N"});
+                          pairs.push({a:"E",b:"N",ra:re,rb:rn,label:"E:N"});
+                        }
+                        for (const p of pairs) {
+                          const va = pc[p.a], vb = pc[p.b];
+                          const prev_diff = va * p.rb - vb * p.ra;
+                          const hard = dualCap * (p.ra + p.rb);
+                          const nDays = dPeriod;
+                          const maxCompensate = nDays * Math.max(p.ra, p.rb);
+                          if (Math.abs(prev_diff) > hard + maxCompensate) {
+                            const shortage = Math.abs(prev_diff) - hard - maxCompensate;
+                            issues.push({
+                              text: `pair ${p.label} 上月差 ${prev_diff > 0 ? "+" : ""}${prev_diff} 超目標 ±${hard}(本月最多補 ${maxCompensate},仍差 ${shortage} 單位 → 罰約 ${shortage * h14Pen})`,
+                              sev: "heavy",
+                            });
+                          } else if (Math.abs(prev_diff) > hard) {
+                            issues.push({
+                              text: `pair ${p.label} 上月差 ${prev_diff > 0 ? "+" : ""}${prev_diff} 超目標 ±${hard}(solver 會極端補償)`,
+                              sev: "over",
+                            });
+                          }
+                        }
+                      }
+
+                      if (issues.length > 0) {
+                        anomalies.push({ uid: u.uid, name: u.name, attr, pc, issues });
+                      }
+                    }
+
+                    if (anomalies.length === 0) return null;
+                    const heavyCount = anomalies.filter(a => a.issues.some(i => i.sev === "heavy")).length;
+                    const overCount = anomalies.filter(a => a.issues.some(i => i.sev === "over")).length - heavyCount;
+                    const fallbackCount = anomalies.filter(a => a.issues.some(i => i.sev === "fallback")).length;
+
+                    const sevColor = (sev: Sev) => sev === "heavy" ? "#dc2626" : sev === "over" ? "#f97316" : sev === "fallback" ? "#3b82f6" : "#6b7280";
+                    const anomalyBorder = (a: Anomaly) => {
+                      const hasHeavy = a.issues.some(i => i.sev === "heavy");
+                      const hasOver = a.issues.some(i => i.sev === "over");
+                      return hasHeavy ? "#dc2626" : hasOver ? "#f97316" : "#3b82f6";
+                    };
+
+                    return (
+                      <div style={{
+                        background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, padding:"12px 14px",
+                        fontSize:13, color:"#78350f",
+                      }}>
+                        <div style={{ fontWeight:700, marginBottom:8, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                          <span>⚠ 上月資料提示({anomalies.length} 人)</span>
+                          <span style={{ fontSize:11, fontWeight:500 }}>
+                            H14:{dualCap === 0 ? "已關閉" : `軟目標 DUAL=${dualCap}、每單位罰 ${h14Pen}`}
+                          </span>
+                          {fallbackCount > 0 && (
+                            <span style={{ fontSize:11, fontWeight:700, color:"#1e40af", padding:"2px 6px", background:"#dbeafe", borderRadius:4 }}>
+                              {fallbackCount} 人跨 attr 補償
+                            </span>
+                          )}
+                          {overCount > 0 && (
+                            <span style={{ fontSize:11, fontWeight:700, color:"#9a3412", padding:"2px 6px", background:"#ffedd5", borderRadius:4 }}>
+                              {overCount} 人需極端補償
+                            </span>
+                          )}
+                          {heavyCount > 0 && (
+                            <span style={{ fontSize:11, fontWeight:700, color:"#991b1b", padding:"2px 6px", background:"#fee2e2", borderRadius:4 }}>
+                              {heavyCount} 人本月補不完 → H14 罰值高
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display:"flex", flexDirection:"column", gap:6, fontSize:12 }}>
+                          {anomalies.map(a => (
+                            <div key={a.uid} style={{
+                              padding:"6px 10px", background:"#fff",
+                              border:"1px solid #fde68a",
+                              borderLeft:`3px solid ${anomalyBorder(a)}`,
+                              borderRadius:6,
+                            }}>
+                              <div style={{ fontWeight:700, color:"#374151" }}>
+                                {a.name}<span style={{ color:"#6b7280", fontWeight:400 }}>({a.attr})</span>
+                                <span style={{ marginLeft:8, color:"#6b7280", fontWeight:400 }}>上月 D:E:N = {a.pc.D}:{a.pc.E}:{a.pc.N}</span>
+                              </div>
+                              <ul style={{ margin:"4px 0 0 18px", padding:0 }}>
+                                {a.issues.map((it, k) => (
+                                  <li key={k} style={{ color: sevColor(it.sev) }}>{it.text}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ))}
+                        </div>
+                        {dualCap > 0 && (heavyCount > 0 || overCount > 0) && (
+                          <div style={{ marginTop:8, fontSize:11.5, color:"#78350f", lineHeight:1.6 }}>
+                            💡 H14 是「軟目標」,超出只是加罰不會 INFEASIBLE。若不想被罰太重,可到「進階調參 → 硬規則參數」放寬 <b>RATIO_CAP_DAYS_DUAL</b>(如 5-7)、降低 <b>H14_SOFT_PENALTY</b>(如 500),或直接設 DUAL=0 關閉 H14
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   {/* ── 人力試算 */}
                   {(() => {
                     const n = dCycle.period_days;
@@ -3718,8 +4210,9 @@ export default function AdminPage() {
                     const fullNurses  = clinicalNurses.filter(u => !u.halftime).length;
                     const halfNurses  = clinicalNurses.filter(u =>  u.halftime).length;
                     // 非臨床/請假類已填班別統計：D/E/N/OFF/半 以外全部計入（未來新增班別自動涵蓋）
+                    // 排除新人（與整段人力試算一致，新人不計入臨床人力名額）
                     const _baseShifts = ["D", "E", "N", "OFF", "半"];
-                    const _schedulableUids = new Set(schedulableNurses.map(u => u.uid));
+                    const _schedulableUids = new Set(schedulableNurses.filter(u => !u.is_trainee).map(u => u.uid));
                     const specialShiftCount = schedule.filter(r =>
                       dCycleDays.includes(r.date) && r.shift &&
                       !_baseShifts.includes(r.shift) && _schedulableUids.has(r.nurse_uid)
@@ -3868,9 +4361,33 @@ export default function AdminPage() {
                       <div style={{ fontSize:13, fontWeight:700, color:"#92400e", marginBottom:8 }}>
                         確定要生成班表嗎？將依序生成三個版本供比較（只填入空白格子，已填班別一律保留）
                       </div>
-                      <div style={{ display:"flex", gap:8 }}>
+                      <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
                         <button className="btn btn-gray btn-sm" onClick={() => setConfirmGenerate(false)}>取消</button>
                         <button className="btn btn-primary btn-sm" onClick={runGenerate}>確認生成</button>
+                        <span style={{ fontSize:12, color:"#78350f", fontWeight:600, marginLeft:12, whiteSpace:"nowrap" }}>隨機探索:</span>
+                        {GEN_PROFILES.map(p => {
+                          const on = !!randomExplore[p.key];
+                          return (
+                            <button key={p.key} type="button"
+                              onClick={() => setRandomExplore(prev => ({ ...prev, [p.key]: !prev[p.key] }))}
+                              title={`點擊切換:${p.label} 是否啟用 CP-SAT 隨機探索(randomize_search)。適合 seed 都卡住時。重新整理頁面自動取消`}
+                              style={{
+                                padding:"4px 10px",
+                                border: on ? "1px solid #1d4ed8" : "1px solid #d1d5db",
+                                borderRadius:5,
+                                background: on ? "#2563eb" : "#f3f4f6",
+                                color: on ? "#fff" : "#6b7280",
+                                cursor:"pointer",
+                                fontSize:12,
+                                fontWeight: on ? 600 : 500,
+                                whiteSpace:"nowrap",
+                                marginLeft:4,
+                                lineHeight:1.3,
+                              }}>
+                              {p.label}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   ) : (
@@ -4068,7 +4585,7 @@ export default function AdminPage() {
                         {v.warnings.length > 0 && (
                           <div style={{ background:"#fffbeb", border:"1px solid #fde68a", borderRadius:10, padding:"12px 16px", fontSize:13 }}>
                             <div style={{ fontWeight:700, color:"#92400e", marginBottom:6 }}>人力不足警告</div>
-                            {v.warnings.map((w, i) => <div key={i} style={{ color:"#92400e" }}>{w}</div>)}
+                            {v.warnings.map((w, i) => <div key={i} style={{ color:"#92400e", whiteSpace:"pre-line", lineHeight:1.7 }}>{w}</div>)}
                             <div style={{ fontSize:12, color:"#b45309", marginTop:6 }}>應休天數已平均縮減，請確認後再送出確認。</div>
                           </div>
                         )}
@@ -4255,6 +4772,69 @@ export default function AdminPage() {
           ]}
         />
       )}
+
+      {/* ── 上週期 D/E/N 手動輸入 Modal(點彈窗外自動儲存) */}
+      {prevCyclePopup && (() => {
+        const uid = prevCyclePopup.uid;
+        const cur = prevCycleCounts[uid] || { D: 0, E: 0, N: 0 };
+        const formRef = { current: null as HTMLFormElement | null };
+        const saveAndClose = () => {
+          const f = formRef.current;
+          if (!f) { setPrevCyclePopup(null); return; }
+          const fd = new FormData(f);
+          const d = Math.max(0, parseInt(String(fd.get("d") || "0"), 10) || 0);
+          const eCnt = Math.max(0, parseInt(String(fd.get("e") || "0"), 10) || 0);
+          const n = Math.max(0, parseInt(String(fd.get("n") || "0"), 10) || 0);
+          // 只有跟原值不同才 POST(避免無變化也送 API)
+          if (d !== (cur.D || 0) || eCnt !== (cur.E || 0) || n !== (cur.N || 0)) {
+            setPrevCycleCounts(prev => {
+              const next = { ...prev };
+              if (d === 0 && eCnt === 0 && n === 0) delete next[uid];
+              else next[uid] = { D: d, E: eCnt, N: n };
+              api.post("/rules", { rules: { prev_cycle_counts: next } })
+                .then(() => showToast("上週期已儲存"))
+                .catch(() => showToast("✗ 上週期儲存失敗", false));
+              return next;
+            });
+          }
+          setPrevCyclePopup(null);
+        };
+        return (
+          <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center" }}
+            onClick={saveAndClose}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background:"#fff", borderRadius:10, padding:"20px 24px", minWidth:280, boxShadow:"0 8px 24px rgba(0,0,0,.2)" }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:4 }}>
+                <div style={{ fontSize:15, fontWeight:700, color:"#374151" }}>上週期實際班數</div>
+                <button type="button" onClick={saveAndClose}
+                  title="關閉並儲存"
+                  style={{ padding:"0 6px", border:"none", background:"transparent", color:"#9ca3af", cursor:"pointer", fontSize:20, lineHeight:1 }}>×</button>
+              </div>
+              <div style={{ fontSize:12, color:"#6b7280", marginBottom:14 }}>{prevCyclePopup.name} · 點空白處或右上 × 自動儲存</div>
+              <form ref={f => { formRef.current = f; }}
+                onSubmit={e => { e.preventDefault(); saveAndClose(); }}>
+                {[
+                  { key: "d", label: "D 班", val: cur.D || 0, color: "#dbeafe" },
+                  { key: "e", label: "E 班", val: cur.E || 0, color: "#fef3c7" },
+                  { key: "n", label: "N 班", val: cur.N || 0, color: "#e9d5ff" },
+                ].map(({ key, label, val, color }) => (
+                  <label key={key} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                    <span style={{
+                      display:"inline-block", width:44, padding:"6px 10px", background:color, borderRadius:6,
+                      fontSize:13, fontWeight:700, color:"#374151", textAlign:"center",
+                    }}>{label}</span>
+                    <input name={key} type="number" min={0} max={31}
+                      defaultValue={val === 0 ? "" : String(val)}
+                      placeholder="0"
+                      onFocus={e => e.currentTarget.select()}
+                      style={{ flex:1, padding:"7px 10px", border:"1px solid #d1d5db", borderRadius:6, fontSize:15, textAlign:"center" }} />
+                  </label>
+                ))}
+              </form>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── 批次填入 Modal(多選 N 格後選班別) */}
       {batchFillPopup && (

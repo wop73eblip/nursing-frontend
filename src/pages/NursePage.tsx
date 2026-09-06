@@ -265,6 +265,14 @@ export default function NursePage() {
   const [rulesFetched, setRulesFetched] = useState(() => {
     try { return !!localStorage.getItem("nurseCycleRange"); } catch { return false; }
   });
+  // 填表截止日(從 rules.cycle.deadline_date/time 讀取)
+  const [deadline, setDeadline] = useState<{ date: string; time: string } | null>(() => {
+    try {
+      const cached = localStorage.getItem("nurseDeadline");
+      if (cached) { const p = JSON.parse(cached); if (p?.date) return p; }
+    } catch {}
+    return null;
+  });
 
   // 全員資料
   const [nurses, setNurses] = useState<NurseInfo[]>([]);
@@ -302,9 +310,6 @@ export default function NursePage() {
   const ctrlSelectedRef = useRef<Set<string>>(new Set());
   const shiftRangeRef = useRef<Set<string>>(new Set());
 
-  // 捲動速度
-  const [scrollSpeed, setScrollSpeed] = useState<number>(() => Number(localStorage.getItem("scrollSpeed") ?? 10));
-  const scrollSpeedRef = useRef<number>(10);
   const autoScrollFrameRef = useRef<number | null>(null);
   const tableWrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -405,7 +410,6 @@ export default function NursePage() {
   useEffect(() => { daysRef.current = days; }, [days]);
   useEffect(() => { ctrlSelectedRef.current = ctrlSelected; }, [ctrlSelected]);
   useEffect(() => { shiftRangeRef.current = shiftRange; }, [shiftRange]);
-  useEffect(() => { scrollSpeedRef.current = scrollSpeed; }, [scrollSpeed]);
   useEffect(() => { shiftAnchorRef.current = shiftAnchor; }, [shiftAnchor]);
 
   // 量測日期列各欄寬度（days 或視窗大小改變時重測）
@@ -445,6 +449,14 @@ export default function NursePage() {
     const wrap   = tableWrapRef.current;
     const sticky = stickyScrollRef.current;
     if (!wrap || !sticky) return;
+    // 初始立即同步(避免剛出現時位置未對齊,需左右滑才對正)
+    sticky.scrollLeft = wrap.scrollLeft;
+    // 用 requestAnimationFrame 再同步一次(確保 sticky 已 render 完成後對齊)
+    requestAnimationFrame(() => {
+      if (stickyScrollRef.current && tableWrapRef.current) {
+        stickyScrollRef.current.scrollLeft = tableWrapRef.current.scrollLeft;
+      }
+    });
     const onScroll = () => { sticky.scrollLeft = wrap.scrollLeft; };
     wrap.addEventListener("scroll", onScroll, { passive: true });
     return () => wrap.removeEventListener("scroll", onScroll);
@@ -453,9 +465,27 @@ export default function NursePage() {
 
   async function loadAll() {
     try {
-      const [usersRes, rulesRes] = await Promise.all([
+      // 優化:讀 localStorage 快取的 cycle → 進場立刻並行發 3 個 request(users + rules + schedules)
+      let cachedMonths: { year: number; month: number }[] = [];
+      try {
+        const cached = JSON.parse(localStorage.getItem("nurseCycleRange") || "null");
+        if (cached?.start && cached?.end) {
+          const months = new Map<string, { year: number; month: number }>();
+          let d = dayjs(cached.start);
+          while (!d.isAfter(dayjs(cached.end))) {
+            months.set(d.format("YYYY-MM"), { year: d.year(), month: d.month() + 1 });
+            d = d.add(1, "month").startOf("month");
+          }
+          cachedMonths = Array.from(months.values());
+        }
+      } catch {}
+      if (cachedMonths.length === 0) cachedMonths = [{ year, month }];
+
+      // 3 組 request 完全並行(schedule 用 cache 猜)
+      const [usersRes, rulesRes, ...cachedSchedResults] = await Promise.all([
         api.get("/users"),
         api.get("/rules"),
+        ...cachedMonths.map(({ year: y, month: m }) => api.get("/schedule", { params: { year: y, month: m } })),
       ]);
 
       // 載入自訂班別 & 週期
@@ -478,6 +508,17 @@ export default function NursePage() {
         try { localStorage.removeItem("nurseCycleRange"); } catch {}
         cycleStart = ""; cycleEnd = "";
       }
+      // 填表截止日
+      const dlDate = r.cycle?.deadline_date ?? "";
+      const dlTime = r.cycle?.deadline_time ?? "";
+      if (dlDate) {
+        const dl = { date: dlDate, time: dlTime || "23:59" };
+        setDeadline(dl);
+        try { localStorage.setItem("nurseDeadline", JSON.stringify(dl)); } catch {}
+      } else {
+        setDeadline(null);
+        try { localStorage.removeItem("nurseDeadline"); } catch {}
+      }
       setRulesFetched(true);
 
       // 決定要拉哪幾個月的班表
@@ -493,10 +534,19 @@ export default function NursePage() {
           })()
         : [{ year, month }];
 
-      const schedResults = await Promise.all(
-        monthsToFetch.map(({ year: y, month: m }) => api.get("/schedule", { params: { year: y, month: m } }))
-      );
-      const schedRes = { data: { schedule: schedResults.flatMap(res => res.data.schedule ?? []) } };
+      // 若真實 cycle 與 cache 完全一致,直接用剛才並行拿到的 schedResults;否則補打真實所需月份
+      const cachedKeys = new Set(cachedMonths.map(m => `${m.year}-${m.month}`));
+      const needExtra = monthsToFetch.filter(m => !cachedKeys.has(`${m.year}-${m.month}`));
+      const extraResults = needExtra.length
+        ? await Promise.all(needExtra.map(({ year: y, month: m }) => api.get("/schedule", { params: { year: y, month: m } })))
+        : [];
+      // 過濾 cachedSchedResults 只保留還在 monthsToFetch 內的月份(cache 若過期不對應則丟棄)
+      const validCached = cachedSchedResults.filter((_, i) => {
+        const cm = cachedMonths[i];
+        return monthsToFetch.some(m => m.year === cm.year && m.month === cm.month);
+      });
+      const allSchedResults = [...validCached, ...extraResults];
+      const schedRes = { data: { schedule: allSchedResults.flatMap(res => res.data.schedule ?? []) } };
 
       const nurseList: NurseInfo[] = (usersRes.data.users ?? [])
         .filter((u: any) => ["nurse", "dual"].includes(u.role))
@@ -619,7 +669,7 @@ export default function NursePage() {
 
         // 自動捲動
         const wrap = tableWrapRef.current;
-        const spd = scrollSpeedRef.current;
+        const spd = 2.5;   // 固定 150px/秒(60fps × 2.5),NursePage 拖曳選連續多天
         if (wrap) {
           if (autoScrollFrameRef.current) cancelAnimationFrame(autoScrollFrameRef.current);
           const W = window.innerWidth;
@@ -1060,7 +1110,20 @@ export default function NursePage() {
             <div>
               <div style={{ fontSize: 15, fontWeight: 700 }}>本期預班表</div>
               {cycleRange ? (
-                <div style={{ fontSize: 18, color: "#000", fontWeight: 600, marginTop: 2 }} className="np-cycle-title">{cycleTitleLabel}</div>
+                <>
+                  <div style={{ fontSize: 18, color: "#000", fontWeight: 600, marginTop: 2 }} className="np-cycle-title">{cycleTitleLabel}</div>
+                  {deadline && (() => {
+                    const dl = dayjs(`${deadline.date}T${deadline.time}`);
+                    const now = dayjs();
+                    const expired = dl.isBefore(now);
+                    const dow = DOW_ZH_NP[dl.day()];
+                    return (
+                      <div style={{ fontSize: 12, color: expired ? "#dc2626" : "#dc2626", fontWeight: 600, marginTop: 3 }}>
+                        ⏰ 填表截止:{dl.format("M/DD")}（{dow}）{deadline.time}{expired && " ⚠ 已過期"}
+                      </div>
+                    );
+                  })()}
+                </>
               ) : !rulesFetched ? (
                 <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>載入中…</div>
               ) : null}
@@ -1081,8 +1144,8 @@ export default function NursePage() {
             {Object.keys(myStats).length === 0
               ? <span style={{ color: "#d1d5db", fontWeight: 400 }}>本月尚未填寫預班</span>
               : <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400 }}>
-                  已確認 {Object.values(mySchedule).filter(v => v.confirmed).length} 格
-                  ／待確認 {Object.values(mySchedule).filter(v => !v.confirmed).length + pendingDeletes.size} 格
+                  已確認 {Object.entries(mySchedule).filter(([d, v]) => cycleDaySet.has(d) && v.confirmed).length} 格
+                  ／待確認 {Object.entries(mySchedule).filter(([d, v]) => cycleDaySet.has(d) && !v.confirmed).length + pendingDeletes.size} 格
                 </span>
             }
           </div>
@@ -1093,19 +1156,6 @@ export default function NursePage() {
             <span className="legend-dot"><span className="legend-box" style={{ background: "#166534", borderColor: "#14532d" }} />已確認</span>
             <span className="legend-dot"><span className="legend-box" style={{ background: "#fef9c3", borderColor: "#eab308" }} />屬性不符（待確認）</span>
             <span className="legend-dot"><span className="legend-box" style={{ background: "#854d0e", borderColor: "#713f12" }} />屬性不符（已確認）</span>
-          </div>
-
-          {/* 捲動速度選擇器 */}
-          <div style={{ display:"flex", alignItems:"center", gap:4, justifyContent:"flex-end", padding:"4px 8px 2px" }}>
-            <span style={{ fontSize:11, color:"#9ca3af" }}>捲動速度</span>
-            {([{l:"🐢",v:3},{l:"慢",v:6},{l:"中",v:10},{l:"快",v:14},{l:"🐇",v:18}] as {l:string;v:number}[]).map(({l,v})=>(
-              <button key={v} onClick={()=>{setScrollSpeed(v);localStorage.setItem("scrollSpeed",String(v));}}
-                style={{ padding:"2px 7px", borderRadius:5, border:"1px solid #e5e7eb", fontSize:12, cursor:"pointer",
-                  background:scrollSpeed===v?"#16a34a":"#f9fafb", color:scrollSpeed===v?"#fff":"#374151",
-                  fontWeight:scrollSpeed===v?700:400, lineHeight:1.4 }}>
-                {l}
-              </button>
-            ))}
           </div>
 
           {/* 表格 */}
@@ -1137,6 +1187,7 @@ export default function NursePage() {
                       <td className={`td-name${isMe ? " is-me" : ""}`}>
                         {n.name}
                         {n.halftime && <span style={{ fontSize: 9, color: "#16a34a", fontWeight: 700, marginLeft: 3 }}>半</span>}
+                        {(n as any).is_trainee && <span style={{ fontSize: 9, color: "#f97316", fontWeight: 700, marginLeft: 3 }}>新</span>}
                         {n.admin_staff && <span style={{ fontSize: 9, color: "#7c3aed", fontWeight: 700, marginLeft: 3 }}>行政</span>}
                         {isMe ? " ★" : ""}
                       </td>

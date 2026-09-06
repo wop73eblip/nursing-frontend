@@ -1,0 +1,46 @@
+name: Deploy Frontend
+
+# push 到 main 自動 build + deploy 到 Cloudflare Pages
+# 忽略只改 test/README 的情況(不需要重新 deploy)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'tests-e2e/**'
+      - '**.md'
+      - '.gitignore'
+      - 'playwright.config.ts'
+  workflow_dispatch:    # 手動觸發(GitHub Actions 頁面按鈕)
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:       # 同一時間只跑一個 deploy(避免競爭)
+      group: deploy-frontend
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=nursing-system --branch=main --commit-dirty=true
+
+      - name: Report success
+        run: echo "✅ Frontend deployed to https://nursing-system.pages.dev"

@@ -3324,7 +3324,6 @@ export default function AdminPage() {
             { no:"H3",  title:"反向班禁止", desc:"E→D 隔 1 天休；N→E 隔 1 天休；N→D 隔 2 天休。固定啟用、不可關閉" },
             { no:"H4",  title:"每週 D/E/N 至多兩種班別", desc:"預填出現班屬外班別時，該週自動改為「例外+一種原班」" },
             { no:"H5",  title:"每週至少 1 天休", desc:"底線，恆常生效（OFF 或半）" },
-            { no:"H6",  title:"一例一休（每週至少 2 天休）", desc:"勾選時硬性；湊不出會失敗。不勾則不強制下限，但 H5 仍在" },
             { no:"H7",  title:"每班每日至少 1 位 leader", desc:"行政班、新人的 leader 不算" },
             { no:"H8",  title:"每班每日至少 2 位 leader/second", desc:"受當班需求人數上限 min(2, 需求)；行政班、新人不算" },
             { no:"H9",  title:"連續上班天數不超過設定值", desc:"預設 5 天，跨週累計（含上週歷史）" },
@@ -3349,6 +3348,7 @@ export default function AdminPage() {
             { no:"L2", title:"自動休連續上限 N 天", desc:"系統排的休假不超過 N 天連休（指定休可切斷、放假/調整類也自動中斷；半職不受限）" },
             { no:"L3", title:"連續 OFF 總上限", desc:"指定休+自動休合計連休不得超過設定值（放假/調整類自動中斷；半職不受限）" },
             { no:"L4", title:`應休縮減公平硬性${Number(penaltyForm["SLACK_SPREAD_HARD_CAP"] ?? 0) > 0 ? "（啟用）" : "（未啟用）"}`, desc:Number(penaltyForm["SLACK_SPREAD_HARD_CAP"] ?? 0) > 0 ? "硬規則:所有人的應休縮減天數(slack)最多差 1 天。若無法達成會 INFEASIBLE。在「休假規則」勾選開關" : "設為關閉(預設)。啟用時強制大家平均分攤縮減,人力充足時能確保公平" },
+            { no:"L5", title:`一例一休${rulesForm.one_in_seven ? "（啟用）" : "（未啟用）"}`, desc:rulesForm.one_in_seven ? "每週至少 2 天休(OFF 或半);湊不出會生成失敗。可在「休假規則」勾選取消(取消後仍套 H5 底線:每週至少 1 天休)" : "已取消 · 每週只需至少 1 天休(H5)。可在「休假規則」勾選啟用" },
           ];
           // 動態讀取當下懲罰值(進階調參 penaltyForm > default);與 [main.py:pen()] 對應
           const P = (key: string, def: number) => Number(penaltyForm[key] ?? def);
@@ -3389,7 +3389,7 @@ export default function AdminPage() {
             { k:"各班每日人數",         v:"D／E／N 每日需求（預設 3／3／3）" },
             { k:"特殊日期人數覆蓋",     v:"某天可覆蓋不同 D/E/N（如國定假）" },
             { k:"連續上班上限",         v:"預設 5 天，跨週累計（H9）" },
-            { k:"一例一休",             v:"每週 ≥2 天休（H6）" },
+            { k:"一例一休",             v:"每週 ≥2 天休（L5,可勾選開關）" },
             { k:"允許固定班偏離",       v:"勾＝最多 2 格、未勾＝0（H10）" },
             { k:"每人休假上限",         v:"預班可填的總天數上限（F2）" },
             { k:"自動休每週上限",       v:"系統排的連休天數（L2）" },

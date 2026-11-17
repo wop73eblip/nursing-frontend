@@ -278,6 +278,11 @@ export default function AdminPage() {
   const [prevCycleCounts, setPrevCycleCounts] = useState<Record<string, {D:number;E:number;N:number}>>({});
   const [prevCyclePopup, setPrevCyclePopup] = useState<{ uid: string; name: string } | null>(null);
   const [batchFillPopup, setBatchFillPopup] = useState<{ cells: {uid:string;date:string}[] } | null>(null);
+  // 特殊預填:用「護理師 / 起日 / 迄日 / 班別」批次填入(例:莉莉 12/14-1/3 白班帶新人)
+  const [specialFillOpen, setSpecialFillOpen] = useState(false);
+  const [specialFillRows, setSpecialFillRows] = useState<Array<{
+    nurseUid: string; startDate: string; endDate: string; shift: string;
+  }>>([]);
   const multiDragRef = useRef<{ active: boolean; started: boolean; removeMode: boolean } | null>(null);
   const lastTouchTsRef = useRef<number>(0);   // touch 結束時間戳,阻止 touch 後再觸發 click 重複 toggle
   const [batchPopup, setBatchPopup] = useState<{ nurseUid: string; nurseName: string; dates: string[] } | null>(null);
@@ -2067,6 +2072,18 @@ export default function AdminPage() {
                   color: prevCycleMode ? "#fff" : "#6b7280",
                   borderColor: prevCycleMode ? "#3b82f6" : "#d1d5db" }}>
                 上週期{prevCycleMode ? "(點班屬編輯)" : ""}
+              </button>
+              <button
+                onClick={() => {
+                  if (!cycleIsSet) { showToast("✗ 請先設定排班週期", false); return; }
+                  // 預設一列,日期填週期起迄
+                  setSpecialFillRows([{ nurseUid: "", startDate: cycle.start_date, endDate: cycle.end_date, shift: "" }]);
+                  setSpecialFillOpen(true);
+                }}
+                title="用「護理師 / 起日 / 迄日 / 班別」批次預填一段日期,例如:莉莉 12/14-1/3 白班(帶新人)"
+                style={{ padding:"4px 10px", borderRadius:6, border:"1px solid", cursor:"pointer", fontSize:12, fontWeight:600,
+                  background:"#fff", color:"#7c3aed", borderColor:"#c4b5fd" }}>
+                ✦ 特殊預填
               </button>
               {ctrlSelected.size > 0 && (
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -4877,6 +4894,174 @@ export default function AdminPage() {
           onClose={() => setBatchFillPopup(null)}
         />
       )}
+
+      {/* ── 特殊預填 Modal */}
+      {specialFillOpen && (() => {
+        const allShifts = [...workShifts, ...restShifts, ...offShifts];
+        const inCycle = (d: string) => cycleDays.includes(d);
+        // 統計預覽:每列展開成「落在週期內的 cells」,後覆蓋前
+        const previewMap = new Map<string, string | null>();
+        let outOfRange = 0;
+        for (const row of specialFillRows) {
+          if (!row.nurseUid || !row.startDate || !row.endDate) continue;
+          if (dayjs(row.endDate).isBefore(dayjs(row.startDate))) continue;
+          const days = dateRange(row.startDate, row.endDate);
+          for (const d of days) {
+            if (!inCycle(d)) { outOfRange++; continue; }
+            previewMap.set(`${row.nurseUid}_${d}`, row.shift || null);
+          }
+        }
+        const totalCells = previewMap.size;
+
+        const applyAll = async () => {
+          if (totalCells === 0) { showToast("✗ 沒有符合的格子(檢查日期是否落在週期內)", false); return; }
+          const updates = Array.from(previewMap.entries()).map(([k, shift]) => {
+            const idx = k.indexOf("_");
+            return { nurse_uid: k.slice(0, idx), date: k.slice(idx+1), shift };
+          });
+          if (!window.confirm(`確定要特殊預填 ${totalCells} 格?已填寫的會被覆蓋`)) return;
+          setSchedule(prev => {
+            const map = new Map(prev.map(r => [`${r.nurse_uid}_${r.date}`, r]));
+            for (const u of updates) {
+              const k = `${u.nurse_uid}_${u.date}`;
+              const old = map.get(k);
+              map.set(k, {
+                ...(old || { nurse_uid: u.nurse_uid, date: u.date, confirmed: false } as any),
+                shift: u.shift || null,
+                confirmed: false,
+              });
+            }
+            return Array.from(map.values());
+          });
+          setSpecialFillOpen(false);
+          setSpecialFillRows([]);
+          showToast(`✓ 特殊預填 ${totalCells} 格`);
+          api.post("/schedule/shifts/batch", updates).catch((err: any) => {
+            showToast(`✗ ${err.response?.data?.detail ?? err.message}`, false);
+            fetchSchedule();
+          });
+        };
+
+        return (
+          <div
+            onClick={() => setSpecialFillOpen(false)}
+            style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:12 }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{ background:"#fff", borderRadius:12, padding:20, maxWidth:720, width:"100%", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 10px 40px rgba(0,0,0,.2)" }}
+            >
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+                <div style={{ fontSize:17, fontWeight:700, color:"#7c3aed" }}>✦ 特殊預填</div>
+                <button onClick={() => setSpecialFillOpen(false)}
+                  style={{ padding:"4px 10px", borderRadius:6, background:"transparent", border:"1px solid #e5e7eb", cursor:"pointer", color:"#6b7280", fontSize:13 }}>✕ 關閉</button>
+              </div>
+
+              <div style={{ fontSize:12, color:"#6b7280", background:"#f8fafc", padding:"8px 12px", borderRadius:8, marginBottom:12, lineHeight:1.6 }}>
+                一次對一位護理師、連續一段日期批次填入同一個班別。<br />
+                例:莉莉 12/14-1/3 白班(帶新人)、1/4-1/10 小夜。超出週期的日期會被忽略。已填的 cell 會被覆蓋。班別留空 = 清空該段。
+              </div>
+
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {specialFillRows.map((row, idx) => (
+                  <div key={idx} style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", padding:"8px", background:"#fafafa", borderRadius:8, border:"1px solid #f1f5f9" }}>
+                    <select
+                      value={row.nurseUid}
+                      onChange={(e) => setSpecialFillRows(rows => rows.map((r,i) => i===idx ? { ...r, nurseUid: e.target.value } : r))}
+                      style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13, minWidth:110 }}
+                    >
+                      <option value="">— 護理師 —</option>
+                      {nurseUsers.map(u => (
+                        <option key={u.uid} value={u.uid}>{u.name || u.uid}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="date"
+                      value={row.startDate}
+                      min={cycle.start_date}
+                      max={cycle.end_date}
+                      onChange={(e) => setSpecialFillRows(rows => rows.map((r,i) => i===idx ? { ...r, startDate: e.target.value } : r))}
+                      style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13 }}
+                    />
+                    <span style={{ color:"#9ca3af", fontSize:12 }}>~</span>
+                    <input
+                      type="date"
+                      value={row.endDate}
+                      min={cycle.start_date}
+                      max={cycle.end_date}
+                      onChange={(e) => setSpecialFillRows(rows => rows.map((r,i) => i===idx ? { ...r, endDate: e.target.value } : r))}
+                      style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13 }}
+                    />
+                    <select
+                      value={row.shift}
+                      onChange={(e) => setSpecialFillRows(rows => rows.map((r,i) => i===idx ? { ...r, shift: e.target.value } : r))}
+                      style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13, minWidth:90 }}
+                    >
+                      <option value="">— 班別 —</option>
+                      <optgroup label="上班">
+                        {workShifts.map(s => <option key={s.code} value={s.code}>{s.code} {s.label}</option>)}
+                      </optgroup>
+                      <optgroup label="休假">
+                        {restShifts.map(s => <option key={s.code} value={s.code}>{s.code} {s.label}</option>)}
+                      </optgroup>
+                      <optgroup label="離開">
+                        {offShifts.map(s => <option key={s.code} value={s.code}>{s.code} {s.label}</option>)}
+                      </optgroup>
+                      <option value="__CLEAR__" disabled>— 清空 —</option>
+                    </select>
+                    {(() => {
+                      // 列級統計
+                      if (!row.nurseUid || !row.startDate || !row.endDate) {
+                        return <span style={{ fontSize:11, color:"#9ca3af", marginLeft:"auto" }}>請填完欄位</span>;
+                      }
+                      if (dayjs(row.endDate).isBefore(dayjs(row.startDate))) {
+                        return <span style={{ fontSize:11, color:"#dc2626", marginLeft:"auto" }}>✗ 起日 &gt; 迄日</span>;
+                      }
+                      const days = dateRange(row.startDate, row.endDate);
+                      const inCycleDays = days.filter(d => inCycle(d)).length;
+                      return (
+                        <span style={{ fontSize:11, color:"#059669", marginLeft:"auto", fontWeight:600 }}>
+                          {inCycleDays} 天{days.length > inCycleDays ? `(${days.length - inCycleDays} 天超出週期,忽略)` : ""}
+                        </span>
+                      );
+                    })()}
+                    <button
+                      onClick={() => setSpecialFillRows(rows => rows.filter((_,i) => i !== idx))}
+                      disabled={specialFillRows.length <= 1}
+                      style={{ padding:"4px 8px", borderRadius:6, background:"#fff", border:"1px solid #e5e7eb", cursor: specialFillRows.length <= 1 ? "not-allowed" : "pointer", color: specialFillRows.length <= 1 ? "#d1d5db" : "#dc2626", fontSize:12 }}
+                      title="移除這一列"
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop:10, display:"flex", gap:8, alignItems:"center" }}>
+                <button
+                  onClick={() => setSpecialFillRows(rows => [...rows, { nurseUid: "", startDate: cycle.start_date, endDate: cycle.end_date, shift: "" }])}
+                  style={{ padding:"6px 12px", borderRadius:6, background:"#fff", border:"1px dashed #a78bfa", cursor:"pointer", color:"#7c3aed", fontSize:12, fontWeight:600 }}
+                >+ 新增一列</button>
+                <div style={{ marginLeft:"auto", fontSize:13, fontWeight:700, color: totalCells > 0 ? "#059669" : "#9ca3af" }}>
+                  預覽:共 {totalCells} 格會被填入{outOfRange > 0 ? `(${outOfRange} 天超出週期)` : ""}
+                </div>
+              </div>
+
+              <div style={{ marginTop:16, display:"flex", justifyContent:"flex-end", gap:8 }}>
+                <button onClick={() => setSpecialFillOpen(false)}
+                  style={{ padding:"8px 16px", borderRadius:8, background:"#fff", border:"1px solid #d1d5db", cursor:"pointer", color:"#374151", fontSize:13 }}>取消</button>
+                <button onClick={applyAll}
+                  disabled={totalCells === 0}
+                  style={{ padding:"8px 16px", borderRadius:8, background: totalCells > 0 ? "#7c3aed" : "#d1d5db", border:"none", cursor: totalCells > 0 ? "pointer" : "not-allowed", color:"#fff", fontSize:13, fontWeight:600 }}>
+                  套用 ({totalCells})
+                </button>
+              </div>
+
+              <div style={{ marginTop:8, fontSize:11, color:"#9ca3af" }}>
+                可用班別:{allShifts.map(s => s.code).join(" / ")}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── 班別選擇 Modal */}
       {popup && (

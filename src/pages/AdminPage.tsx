@@ -4934,8 +4934,15 @@ export default function AdminPage() {
           setForbiddenPairs(payload);
           setPairModalOpen(false);
           try {
-            await api.post("/rules", { rules: { forbidden_pairs: payload } });
-            showToast(`✓ 已儲存 ${payload.length} 條王不見王`);
+            const res = await api.post("/rules", { rules: { forbidden_pairs: payload } });
+            const dbCnt = res?.data?.counts?.forbidden_pairs;
+            if (typeof dbCnt === "number" && dbCnt !== payload.length) {
+              showToast(`⚠ 送出 ${payload.length} 條但 DB 僅存 ${dbCnt} 條`, false);
+            } else if (typeof dbCnt === "number") {
+              showToast(`✓ 已儲存 ${payload.length} 條王不見王(DB 確認 ${dbCnt} 條)`);
+            } else {
+              showToast(`✓ 已儲存 ${payload.length} 條王不見王`);
+            }
           } catch (err: any) {
             showToast(`✗ 儲存失敗:${err.response?.data?.detail ?? err.message}`, false);
           }
@@ -5048,8 +5055,15 @@ export default function AdminPage() {
           setShiftRestrictions(payload);
           setRestrictModalOpen(false);
           try {
-            await api.post("/rules", { rules: { shift_restrictions: payload } });
-            showToast(`✓ 已儲存 ${payload.length} 條班別限制`);
+            const res = await api.post("/rules", { rules: { shift_restrictions: payload } });
+            const dbCnt = res?.data?.counts?.shift_restrictions;
+            if (typeof dbCnt === "number" && dbCnt !== payload.length) {
+              showToast(`⚠ 送出 ${payload.length} 條但 DB 僅存 ${dbCnt} 條(資料結構錯誤)`, false);
+            } else if (typeof dbCnt === "number") {
+              showToast(`✓ 已儲存 ${payload.length} 條班別限制(DB 確認 ${dbCnt} 條)`);
+            } else {
+              showToast(`✓ 已儲存 ${payload.length} 條班別限制`);
+            }
           } catch (err: any) {
             showToast(`✗ 儲存失敗:${err.response?.data?.detail ?? err.message}`, false);
           }

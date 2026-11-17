@@ -284,6 +284,11 @@ export default function AdminPage() {
   const [shiftRestrictions, setShiftRestrictions] = useState<ShiftRestriction[]>([]);
   const [restrictModalOpen, setRestrictModalOpen] = useState(false);
   const [restrictDraft, setRestrictDraft] = useState<ShiftRestriction[]>([]);
+  // 王不見王:兩位護理師不能同一天同一班(或同一天)
+  interface ForbiddenPair { a_uid: string; b_uid: string; mode: "same_shift"|"same_day"; start_date?: string; end_date?: string; }
+  const [forbiddenPairs, setForbiddenPairs] = useState<ForbiddenPair[]>([]);
+  const [pairModalOpen, setPairModalOpen] = useState(false);
+  const [pairDraft, setPairDraft] = useState<ForbiddenPair[]>([]);
   const multiDragRef = useRef<{ active: boolean; started: boolean; removeMode: boolean } | null>(null);
   const lastTouchTsRef = useRef<number>(0);   // touch 結束時間戳,阻止 touch 後再觸發 click 重複 toggle
   const [batchPopup, setBatchPopup] = useState<{ nurseUid: string; nurseName: string; dates: string[] } | null>(null);
@@ -1119,6 +1124,7 @@ export default function AdminPage() {
       if (r.nurse_deviation_overrides) setNurseDevOverrides(r.nurse_deviation_overrides);
       if (r.prev_cycle_counts) setPrevCycleCounts(r.prev_cycle_counts);
       if (r.shift_restrictions && Array.isArray(r.shift_restrictions)) setShiftRestrictions(r.shift_restrictions);
+      if (r.forbidden_pairs && Array.isArray(r.forbidden_pairs)) setForbiddenPairs(r.forbidden_pairs);
       if (r.shifts?.work) { setWorkShifts(r.shifts.work); setEditWorkShifts(r.shifts.work); }
       if (r.shifts?.rest) { setRestShifts(r.shifts.rest); setEditRestShifts(r.shifts.rest); }
       if (r.shifts?.off)  { setOffShifts(r.shifts.off);  setEditOffShifts(r.shifts.off);   }
@@ -2091,6 +2097,22 @@ export default function AdminPage() {
                   color: shiftRestrictions.length > 0 ? "#fff" : "#7c3aed",
                   borderColor:"#c4b5fd" }}>
                 ✦ 班別限制{shiftRestrictions.length > 0 ? `(${shiftRestrictions.length})` : ""}
+              </button>
+              <button
+                onClick={() => {
+                  if (!cycleIsSet) { showToast("✗ 請先設定排班週期", false); return; }
+                  const base = forbiddenPairs.length > 0
+                    ? forbiddenPairs.map(p => ({ ...p }))
+                    : [{ a_uid: "", b_uid: "", mode: "same_shift" as const, start_date: "", end_date: "" }];
+                  setPairDraft(base);
+                  setPairModalOpen(true);
+                }}
+                title="禁止兩位護理師同一天同一班(或同一天)。例:A 和 B 關係緊張,不要安排一起上班。"
+                style={{ padding:"4px 10px", borderRadius:6, border:"1px solid", cursor:"pointer", fontSize:12, fontWeight:600,
+                  background: forbiddenPairs.length > 0 ? "#dc2626" : "#fff",
+                  color: forbiddenPairs.length > 0 ? "#fff" : "#dc2626",
+                  borderColor:"#fca5a5" }}>
+                ⚔ 王不見王{forbiddenPairs.length > 0 ? `(${forbiddenPairs.length})` : ""}
               </button>
               {ctrlSelected.size > 0 && (
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -4901,6 +4923,144 @@ export default function AdminPage() {
           onClose={() => setBatchFillPopup(null)}
         />
       )}
+
+      {/* ── 王不見王 Modal */}
+      {pairModalOpen && (() => {
+        const validRows = pairDraft.filter(p =>
+          p.a_uid && p.b_uid && p.a_uid !== p.b_uid &&
+          (!p.start_date || !p.end_date || !dayjs(p.end_date).isBefore(dayjs(p.start_date)))
+        );
+        const nurseName = (uid: string) => nurseUsers.find(u => u.uid === uid)?.name || uid;
+
+        const applyAll = async () => {
+          const payload = validRows.map(p => ({
+            a_uid: p.a_uid,
+            b_uid: p.b_uid,
+            mode: p.mode || "same_shift",
+            ...(p.start_date ? { start_date: p.start_date } : {}),
+            ...(p.end_date ? { end_date: p.end_date } : {}),
+          }));
+          setForbiddenPairs(payload as ForbiddenPair[]);
+          setPairModalOpen(false);
+          try {
+            await api.post("/rules", { rules: { forbidden_pairs: payload } });
+            showToast(`✓ 已儲存 ${payload.length} 條王不見王`);
+          } catch (err: any) {
+            showToast(`✗ 儲存失敗:${err.response?.data?.detail ?? err.message}`, false);
+          }
+        };
+
+        return (
+          <div onClick={() => setPairModalOpen(false)}
+            style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:12 }}>
+            <div onClick={(e) => e.stopPropagation()}
+              style={{ background:"#fff", borderRadius:12, padding:20, maxWidth:820, width:"100%", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 10px 40px rgba(0,0,0,.2)" }}>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+                <div style={{ fontSize:17, fontWeight:700, color:"#dc2626" }}>⚔ 王不見王</div>
+                <button onClick={() => setPairModalOpen(false)}
+                  style={{ padding:"4px 10px", borderRadius:6, background:"transparent", border:"1px solid #e5e7eb", cursor:"pointer", color:"#6b7280", fontSize:13 }}>✕ 關閉</button>
+              </div>
+
+              <div style={{ fontSize:12, color:"#6b7280", background:"#fef2f2", padding:"10px 12px", borderRadius:8, marginBottom:12, lineHeight:1.65 }}>
+                禁止兩位護理師一起上班。<br />
+                <b style={{ color:"#dc2626" }}>同班禁</b>(推薦):同一天同一班禁止(A 白、B 大夜 OK,因為不會碰到)。<br />
+                <b style={{ color:"#dc2626" }}>同天禁</b>(嚴格):同一天上班就禁止(連不同班都不行)。<br />
+                日期留空 = 整個週期生效。預填鎖定優先,衝突時讓路。
+              </div>
+
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {pairDraft.map((p, idx) => (
+                  <div key={idx} style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", padding:"10px", background:"#fafafa", borderRadius:8, border:"1px solid #f1f5f9" }}>
+                    <select value={p.a_uid}
+                      onChange={(e) => setPairDraft(rows => rows.map((r,i) => i===idx ? { ...r, a_uid: e.target.value } : r))}
+                      style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13, minWidth:110 }}>
+                      <option value="">— A —</option>
+                      {nurseUsers.map(u => <option key={u.uid} value={u.uid}>{u.name || u.uid}</option>)}
+                    </select>
+                    <span style={{ color:"#dc2626", fontSize:16, fontWeight:700 }}>⚔</span>
+                    <select value={p.b_uid}
+                      onChange={(e) => setPairDraft(rows => rows.map((r,i) => i===idx ? { ...r, b_uid: e.target.value } : r))}
+                      style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13, minWidth:110 }}>
+                      <option value="">— B —</option>
+                      {nurseUsers.map(u => <option key={u.uid} value={u.uid}>{u.name || u.uid}</option>)}
+                    </select>
+                    <select value={p.mode}
+                      onChange={(e) => setPairDraft(rows => rows.map((r,i) => i===idx ? { ...r, mode: e.target.value as any } : r))}
+                      style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:12, fontWeight:600, color:"#dc2626" }}>
+                      <option value="same_shift">同班禁</option>
+                      <option value="same_day">同天禁</option>
+                    </select>
+                    <input type="date"
+                      value={p.start_date || ""}
+                      min={cycle.start_date}
+                      max={cycle.end_date}
+                      placeholder="起日"
+                      onChange={(e) => setPairDraft(rows => rows.map((r,i) => i===idx ? { ...r, start_date: e.target.value } : r))}
+                      style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13 }} />
+                    <span style={{ color:"#9ca3af", fontSize:12 }}>~</span>
+                    <input type="date"
+                      value={p.end_date || ""}
+                      min={cycle.start_date}
+                      max={cycle.end_date}
+                      placeholder="迄日"
+                      onChange={(e) => setPairDraft(rows => rows.map((r,i) => i===idx ? { ...r, end_date: e.target.value } : r))}
+                      style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13 }} />
+                    {(() => {
+                      if (!p.a_uid || !p.b_uid) return <span style={{ fontSize:11, color:"#9ca3af", marginLeft:"auto" }}>請選兩人</span>;
+                      if (p.a_uid === p.b_uid) return <span style={{ fontSize:11, color:"#dc2626", marginLeft:"auto" }}>✗ 同一人</span>;
+                      if (p.start_date && p.end_date && dayjs(p.end_date).isBefore(dayjs(p.start_date))) return <span style={{ fontSize:11, color:"#dc2626", marginLeft:"auto" }}>✗ 起日 &gt; 迄日</span>;
+                      const rng = (p.start_date && p.end_date)
+                        ? `${p.start_date}~${p.end_date}`
+                        : "整個週期";
+                      return <span style={{ fontSize:11, color:"#059669", marginLeft:"auto", fontWeight:600 }}>{rng}</span>;
+                    })()}
+                    <button onClick={() => setPairDraft(rows => rows.filter((_,i) => i !== idx))}
+                      style={{ padding:"4px 8px", borderRadius:6, background:"#fff", border:"1px solid #e5e7eb", cursor:"pointer", color:"#dc2626", fontSize:12 }}
+                      title="移除">✕</button>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop:10, display:"flex", gap:8, alignItems:"center" }}>
+                <button
+                  onClick={() => setPairDraft(rows => [...rows, { a_uid: "", b_uid: "", mode: "same_shift", start_date: "", end_date: "" }])}
+                  style={{ padding:"6px 12px", borderRadius:6, background:"#fff", border:"1px dashed #fca5a5", cursor:"pointer", color:"#dc2626", fontSize:12, fontWeight:600 }}
+                >+ 新增一條</button>
+                <button
+                  onClick={() => { if (!window.confirm("確定要清空所有王不見王?")) return; setPairDraft([]); }}
+                  disabled={pairDraft.length === 0}
+                  style={{ padding:"6px 12px", borderRadius:6, background:"#fff", border:"1px solid #e5e7eb", cursor: pairDraft.length === 0 ? "not-allowed" : "pointer", color: pairDraft.length === 0 ? "#d1d5db" : "#dc2626", fontSize:12 }}
+                >全部清空</button>
+                <div style={{ marginLeft:"auto", fontSize:13, fontWeight:700, color: validRows.length > 0 ? "#059669" : "#9ca3af" }}>
+                  有效 {validRows.length} 條 / 共 {pairDraft.length} 條
+                </div>
+              </div>
+
+              {validRows.length > 0 && (
+                <div style={{ marginTop:12, padding:"8px 12px", background:"#fef2f2", borderRadius:8, fontSize:12, color:"#991b1b", lineHeight:1.7 }}>
+                  <b>生效摘要:</b><br />
+                  {validRows.map((p, i) => (
+                    <div key={i}>
+                      • {nurseName(p.a_uid)} ⚔ {nurseName(p.b_uid)} —
+                      {p.mode === "same_day" ? " 同天禁(整天不能一起)" : " 同班禁(同班不能一起)"}
+                      {p.start_date && p.end_date ? `,${p.start_date}~${p.end_date}` : ",整個週期"}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ marginTop:16, display:"flex", justifyContent:"flex-end", gap:8 }}>
+                <button onClick={() => setPairModalOpen(false)}
+                  style={{ padding:"8px 16px", borderRadius:8, background:"#fff", border:"1px solid #d1d5db", cursor:"pointer", color:"#374151", fontSize:13 }}>取消</button>
+                <button onClick={applyAll}
+                  style={{ padding:"8px 16px", borderRadius:8, background:"#dc2626", border:"none", cursor:"pointer", color:"#fff", fontSize:13, fontWeight:600 }}>
+                  儲存 ({validRows.length})
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── 班別限制 Modal */}
       {restrictModalOpen && (() => {

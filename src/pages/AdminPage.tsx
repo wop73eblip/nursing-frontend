@@ -278,11 +278,12 @@ export default function AdminPage() {
   const [prevCycleCounts, setPrevCycleCounts] = useState<Record<string, {D:number;E:number;N:number}>>({});
   const [prevCyclePopup, setPrevCyclePopup] = useState<{ uid: string; name: string } | null>(null);
   const [batchFillPopup, setBatchFillPopup] = useState<{ cells: {uid:string;date:string}[] } | null>(null);
-  // 特殊預填:用「護理師 / 起日 / 迄日 / 班別」批次填入(例:莉莉 12/14-1/3 白班帶新人)
-  const [specialFillOpen, setSpecialFillOpen] = useState(false);
-  const [specialFillRows, setSpecialFillRows] = useState<Array<{
-    nurseUid: string; startDate: string; endDate: string; shift: string;
-  }>>([]);
+  // 班別限制:某護理師某段日期若排上班「只能」是指定班別(例:莉莉 12/14-1/3 只能排 D 帶新人)
+  // 存到 rules.shift_restrictions,solver 讀取加硬約束。休假類(OFF/V/員)不受限。
+  interface ShiftRestriction { nurse_uid: string; start_date: string; end_date: string; allowed_shifts: string[]; }
+  const [shiftRestrictions, setShiftRestrictions] = useState<ShiftRestriction[]>([]);
+  const [restrictModalOpen, setRestrictModalOpen] = useState(false);
+  const [restrictDraft, setRestrictDraft] = useState<ShiftRestriction[]>([]);
   const multiDragRef = useRef<{ active: boolean; started: boolean; removeMode: boolean } | null>(null);
   const lastTouchTsRef = useRef<number>(0);   // touch 結束時間戳,阻止 touch 後再觸發 click 重複 toggle
   const [batchPopup, setBatchPopup] = useState<{ nurseUid: string; nurseName: string; dates: string[] } | null>(null);
@@ -1117,6 +1118,7 @@ export default function AdminPage() {
       if (r.ratio_overrides) setRatioOverrides(r.ratio_overrides);
       if (r.nurse_deviation_overrides) setNurseDevOverrides(r.nurse_deviation_overrides);
       if (r.prev_cycle_counts) setPrevCycleCounts(r.prev_cycle_counts);
+      if (r.shift_restrictions && Array.isArray(r.shift_restrictions)) setShiftRestrictions(r.shift_restrictions);
       if (r.shifts?.work) { setWorkShifts(r.shifts.work); setEditWorkShifts(r.shifts.work); }
       if (r.shifts?.rest) { setRestShifts(r.shifts.rest); setEditRestShifts(r.shifts.rest); }
       if (r.shifts?.off)  { setOffShifts(r.shifts.off);  setEditOffShifts(r.shifts.off);   }
@@ -2076,14 +2078,19 @@ export default function AdminPage() {
               <button
                 onClick={() => {
                   if (!cycleIsSet) { showToast("✗ 請先設定排班週期", false); return; }
-                  // 預設一列,日期填週期起迄
-                  setSpecialFillRows([{ nurseUid: "", startDate: cycle.start_date, endDate: cycle.end_date, shift: "" }]);
-                  setSpecialFillOpen(true);
+                  // 打開時把現有限制複製進 draft;若沒有則給一列空白
+                  const base = shiftRestrictions.length > 0
+                    ? shiftRestrictions.map(r => ({ ...r, allowed_shifts: [...r.allowed_shifts] }))
+                    : [{ nurse_uid: "", start_date: cycle.start_date, end_date: cycle.end_date, allowed_shifts: [] }];
+                  setRestrictDraft(base);
+                  setRestrictModalOpen(true);
                 }}
-                title="用「護理師 / 起日 / 迄日 / 班別」批次預填一段日期,例如:莉莉 12/14-1/3 白班(帶新人)"
+                title="指定某護理師某段日期若排上班「只能」是哪個班別(例:莉莉 12/14-1/3 只能 D 帶新人)。solver 照常決定哪天上班,但只能排該班別。"
                 style={{ padding:"4px 10px", borderRadius:6, border:"1px solid", cursor:"pointer", fontSize:12, fontWeight:600,
-                  background:"#fff", color:"#7c3aed", borderColor:"#c4b5fd" }}>
-                ✦ 特殊預填
+                  background: shiftRestrictions.length > 0 ? "#7c3aed" : "#fff",
+                  color: shiftRestrictions.length > 0 ? "#fff" : "#7c3aed",
+                  borderColor:"#c4b5fd" }}>
+                ✦ 班別限制{shiftRestrictions.length > 0 ? `(${shiftRestrictions.length})` : ""}
               </button>
               {ctrlSelected.size > 0 && (
                 <div style={{ display:"flex", alignItems:"center", gap:6 }}>
@@ -4895,79 +4902,74 @@ export default function AdminPage() {
         />
       )}
 
-      {/* ── 特殊預填 Modal */}
-      {specialFillOpen && (() => {
-        const allShifts = [...workShifts, ...restShifts, ...offShifts];
-        const inCycle = (d: string) => cycleDays.includes(d);
-        // 統計預覽:每列展開成「落在週期內的 cells」,後覆蓋前
-        const previewMap = new Map<string, string | null>();
-        let outOfRange = 0;
-        for (const row of specialFillRows) {
-          if (!row.nurseUid || !row.startDate || !row.endDate) continue;
-          if (dayjs(row.endDate).isBefore(dayjs(row.startDate))) continue;
-          const days = dateRange(row.startDate, row.endDate);
-          for (const d of days) {
-            if (!inCycle(d)) { outOfRange++; continue; }
-            previewMap.set(`${row.nurseUid}_${d}`, row.shift || null);
-          }
-        }
-        const totalCells = previewMap.size;
+      {/* ── 班別限制 Modal */}
+      {restrictModalOpen && (() => {
+        const workCodes = workShifts.map(s => s.code);  // 可選的工作班 code
+
+        // 驗證 draft:每列需 nurse_uid / 起日 / 迄日 / 至少一個 allowed_shifts;起日 ≤ 迄日
+        const validRows = restrictDraft.filter(r =>
+          r.nurse_uid && r.start_date && r.end_date &&
+          !dayjs(r.end_date).isBefore(dayjs(r.start_date)) &&
+          r.allowed_shifts && r.allowed_shifts.length > 0
+        );
+
+        const toggleShift = (idx: number, code: string) => {
+          setRestrictDraft(rows => rows.map((r, i) => {
+            if (i !== idx) return r;
+            const set = new Set(r.allowed_shifts);
+            if (set.has(code)) set.delete(code); else set.add(code);
+            return { ...r, allowed_shifts: Array.from(set) };
+          }));
+        };
 
         const applyAll = async () => {
-          if (totalCells === 0) { showToast("✗ 沒有符合的格子(檢查日期是否落在週期內)", false); return; }
-          const updates = Array.from(previewMap.entries()).map(([k, shift]) => {
-            const idx = k.indexOf("_");
-            return { nurse_uid: k.slice(0, idx), date: k.slice(idx+1), shift };
-          });
-          if (!window.confirm(`確定要特殊預填 ${totalCells} 格?已填寫的會被覆蓋`)) return;
-          setSchedule(prev => {
-            const map = new Map(prev.map(r => [`${r.nurse_uid}_${r.date}`, r]));
-            for (const u of updates) {
-              const k = `${u.nurse_uid}_${u.date}`;
-              const old = map.get(k);
-              map.set(k, {
-                ...(old || { nurse_uid: u.nurse_uid, date: u.date, confirmed: false } as any),
-                shift: u.shift || null,
-                confirmed: false,
-              });
-            }
-            return Array.from(map.values());
-          });
-          setSpecialFillOpen(false);
-          setSpecialFillRows([]);
-          showToast(`✓ 特殊預填 ${totalCells} 格`);
-          api.post("/schedule/shifts/batch", updates).catch((err: any) => {
-            showToast(`✗ ${err.response?.data?.detail ?? err.message}`, false);
-            fetchSchedule();
-          });
+          // 取有效列 → 送到 rules.shift_restrictions
+          const payload = validRows.map(r => ({
+            nurse_uid: r.nurse_uid,
+            start_date: r.start_date,
+            end_date: r.end_date,
+            allowed_shifts: r.allowed_shifts,
+          }));
+          setShiftRestrictions(payload);
+          setRestrictModalOpen(false);
+          try {
+            await api.post("/rules", { rules: { shift_restrictions: payload } });
+            showToast(`✓ 已儲存 ${payload.length} 條班別限制`);
+          } catch (err: any) {
+            showToast(`✗ 儲存失敗:${err.response?.data?.detail ?? err.message}`, false);
+          }
         };
+
+        const nurseName = (uid: string) => nurseUsers.find(u => u.uid === uid)?.name || uid;
 
         return (
           <div
-            onClick={() => setSpecialFillOpen(false)}
+            onClick={() => setRestrictModalOpen(false)}
             style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.4)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:12 }}
           >
             <div
               onClick={(e) => e.stopPropagation()}
-              style={{ background:"#fff", borderRadius:12, padding:20, maxWidth:720, width:"100%", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 10px 40px rgba(0,0,0,.2)" }}
+              style={{ background:"#fff", borderRadius:12, padding:20, maxWidth:780, width:"100%", maxHeight:"90vh", overflowY:"auto", boxShadow:"0 10px 40px rgba(0,0,0,.2)" }}
             >
               <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
-                <div style={{ fontSize:17, fontWeight:700, color:"#7c3aed" }}>✦ 特殊預填</div>
-                <button onClick={() => setSpecialFillOpen(false)}
+                <div style={{ fontSize:17, fontWeight:700, color:"#7c3aed" }}>✦ 班別限制</div>
+                <button onClick={() => setRestrictModalOpen(false)}
                   style={{ padding:"4px 10px", borderRadius:6, background:"transparent", border:"1px solid #e5e7eb", cursor:"pointer", color:"#6b7280", fontSize:13 }}>✕ 關閉</button>
               </div>
 
-              <div style={{ fontSize:12, color:"#6b7280", background:"#f8fafc", padding:"8px 12px", borderRadius:8, marginBottom:12, lineHeight:1.6 }}>
-                一次對一位護理師、連續一段日期批次填入同一個班別。<br />
-                例:莉莉 12/14-1/3 白班(帶新人)、1/4-1/10 小夜。超出週期的日期會被忽略。已填的 cell 會被覆蓋。班別留空 = 清空該段。
+              <div style={{ fontSize:12, color:"#6b7280", background:"#f8fafc", padding:"10px 12px", borderRadius:8, marginBottom:12, lineHeight:1.65 }}>
+                <b style={{ color:"#7c3aed" }}>這不是預填</b>。這是告訴系統:這位護理師在這段日期內「若排上班」只能是勾選的班別。<br />
+                <b>solver 照常決定哪幾天上班、哪幾天休</b>(依照所有硬/軟規則),但被排到上班時只能是勾的班別。<br />
+                例:莉莉 12/14-1/3 勾 D → 這 21 天若上班只能排 D,不能排 E/N;但仍可能被排 OFF/V。<br />
+                休假類(OFF/V/員/喪…)不受限制。<b>預填已鎖定的格以預填為準</b>(班別限制讓路)。
               </div>
 
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                {specialFillRows.map((row, idx) => (
-                  <div key={idx} style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", padding:"8px", background:"#fafafa", borderRadius:8, border:"1px solid #f1f5f9" }}>
+                {restrictDraft.map((row, idx) => (
+                  <div key={idx} style={{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap", padding:"10px", background:"#fafafa", borderRadius:8, border:"1px solid #f1f5f9" }}>
                     <select
-                      value={row.nurseUid}
-                      onChange={(e) => setSpecialFillRows(rows => rows.map((r,i) => i===idx ? { ...r, nurseUid: e.target.value } : r))}
+                      value={row.nurse_uid}
+                      onChange={(e) => setRestrictDraft(rows => rows.map((r,i) => i===idx ? { ...r, nurse_uid: e.target.value } : r))}
                       style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13, minWidth:110 }}
                     >
                       <option value="">— 護理師 —</option>
@@ -4977,58 +4979,58 @@ export default function AdminPage() {
                     </select>
                     <input
                       type="date"
-                      value={row.startDate}
+                      value={row.start_date}
                       min={cycle.start_date}
                       max={cycle.end_date}
-                      onChange={(e) => setSpecialFillRows(rows => rows.map((r,i) => i===idx ? { ...r, startDate: e.target.value } : r))}
+                      onChange={(e) => setRestrictDraft(rows => rows.map((r,i) => i===idx ? { ...r, start_date: e.target.value } : r))}
                       style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13 }}
                     />
                     <span style={{ color:"#9ca3af", fontSize:12 }}>~</span>
                     <input
                       type="date"
-                      value={row.endDate}
+                      value={row.end_date}
                       min={cycle.start_date}
                       max={cycle.end_date}
-                      onChange={(e) => setSpecialFillRows(rows => rows.map((r,i) => i===idx ? { ...r, endDate: e.target.value } : r))}
+                      onChange={(e) => setRestrictDraft(rows => rows.map((r,i) => i===idx ? { ...r, end_date: e.target.value } : r))}
                       style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13 }}
                     />
-                    <select
-                      value={row.shift}
-                      onChange={(e) => setSpecialFillRows(rows => rows.map((r,i) => i===idx ? { ...r, shift: e.target.value } : r))}
-                      style={{ padding:"5px 8px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13, minWidth:90 }}
-                    >
-                      <option value="">— 班別 —</option>
-                      <optgroup label="上班">
-                        {workShifts.map(s => <option key={s.code} value={s.code}>{s.code} {s.label}</option>)}
-                      </optgroup>
-                      <optgroup label="休假">
-                        {restShifts.map(s => <option key={s.code} value={s.code}>{s.code} {s.label}</option>)}
-                      </optgroup>
-                      <optgroup label="離開">
-                        {offShifts.map(s => <option key={s.code} value={s.code}>{s.code} {s.label}</option>)}
-                      </optgroup>
-                      <option value="__CLEAR__" disabled>— 清空 —</option>
-                    </select>
+                    <div style={{ display:"flex", gap:4, alignItems:"center", marginLeft:4 }}>
+                      <span style={{ fontSize:11, color:"#6b7280", marginRight:2 }}>只能排:</span>
+                      {workCodes.map(code => {
+                        const active = row.allowed_shifts.includes(code);
+                        return (
+                          <button key={code}
+                            onClick={() => toggleShift(idx, code)}
+                            style={{
+                              padding:"3px 8px", borderRadius:5, fontSize:12, fontWeight:600, cursor:"pointer",
+                              background: active ? "#7c3aed" : "#fff",
+                              color: active ? "#fff" : "#374151",
+                              border: `1px solid ${active ? "#7c3aed" : "#d1d5db"}`,
+                            }}>{code}</button>
+                        );
+                      })}
+                    </div>
                     {(() => {
-                      // 列級統計
-                      if (!row.nurseUid || !row.startDate || !row.endDate) {
+                      if (!row.nurse_uid || !row.start_date || !row.end_date) {
                         return <span style={{ fontSize:11, color:"#9ca3af", marginLeft:"auto" }}>請填完欄位</span>;
                       }
-                      if (dayjs(row.endDate).isBefore(dayjs(row.startDate))) {
+                      if (dayjs(row.end_date).isBefore(dayjs(row.start_date))) {
                         return <span style={{ fontSize:11, color:"#dc2626", marginLeft:"auto" }}>✗ 起日 &gt; 迄日</span>;
                       }
-                      const days = dateRange(row.startDate, row.endDate);
-                      const inCycleDays = days.filter(d => inCycle(d)).length;
+                      if (row.allowed_shifts.length === 0) {
+                        return <span style={{ fontSize:11, color:"#dc2626", marginLeft:"auto" }}>✗ 請勾至少一個班別</span>;
+                      }
+                      const days = dateRange(row.start_date, row.end_date);
+                      const inCycleDays = days.filter(d => cycleDays.includes(d)).length;
                       return (
                         <span style={{ fontSize:11, color:"#059669", marginLeft:"auto", fontWeight:600 }}>
-                          {inCycleDays} 天{days.length > inCycleDays ? `(${days.length - inCycleDays} 天超出週期,忽略)` : ""}
+                          {inCycleDays} 天{days.length > inCycleDays ? `(${days.length - inCycleDays} 超期)` : ""}
                         </span>
                       );
                     })()}
                     <button
-                      onClick={() => setSpecialFillRows(rows => rows.filter((_,i) => i !== idx))}
-                      disabled={specialFillRows.length <= 1}
-                      style={{ padding:"4px 8px", borderRadius:6, background:"#fff", border:"1px solid #e5e7eb", cursor: specialFillRows.length <= 1 ? "not-allowed" : "pointer", color: specialFillRows.length <= 1 ? "#d1d5db" : "#dc2626", fontSize:12 }}
+                      onClick={() => setRestrictDraft(rows => rows.filter((_,i) => i !== idx))}
+                      style={{ padding:"4px 8px", borderRadius:6, background:"#fff", border:"1px solid #e5e7eb", cursor:"pointer", color:"#dc2626", fontSize:12 }}
                       title="移除這一列"
                     >✕</button>
                   </div>
@@ -5037,26 +5039,40 @@ export default function AdminPage() {
 
               <div style={{ marginTop:10, display:"flex", gap:8, alignItems:"center" }}>
                 <button
-                  onClick={() => setSpecialFillRows(rows => [...rows, { nurseUid: "", startDate: cycle.start_date, endDate: cycle.end_date, shift: "" }])}
+                  onClick={() => setRestrictDraft(rows => [...rows, { nurse_uid: "", start_date: cycle.start_date, end_date: cycle.end_date, allowed_shifts: [] }])}
                   style={{ padding:"6px 12px", borderRadius:6, background:"#fff", border:"1px dashed #a78bfa", cursor:"pointer", color:"#7c3aed", fontSize:12, fontWeight:600 }}
-                >+ 新增一列</button>
-                <div style={{ marginLeft:"auto", fontSize:13, fontWeight:700, color: totalCells > 0 ? "#059669" : "#9ca3af" }}>
-                  預覽:共 {totalCells} 格會被填入{outOfRange > 0 ? `(${outOfRange} 天超出週期)` : ""}
+                >+ 新增一條</button>
+                <button
+                  onClick={() => {
+                    if (!window.confirm("確定要清空所有班別限制?")) return;
+                    setRestrictDraft([]);
+                  }}
+                  disabled={restrictDraft.length === 0}
+                  style={{ padding:"6px 12px", borderRadius:6, background:"#fff", border:"1px solid #e5e7eb", cursor: restrictDraft.length === 0 ? "not-allowed" : "pointer", color: restrictDraft.length === 0 ? "#d1d5db" : "#dc2626", fontSize:12 }}
+                >全部清空</button>
+                <div style={{ marginLeft:"auto", fontSize:13, fontWeight:700, color: validRows.length > 0 ? "#059669" : "#9ca3af" }}>
+                  有效 {validRows.length} 條 / 共 {restrictDraft.length} 條
                 </div>
               </div>
 
+              {validRows.length > 0 && (
+                <div style={{ marginTop:12, padding:"8px 12px", background:"#faf5ff", borderRadius:8, fontSize:12, color:"#6b21a8", lineHeight:1.7 }}>
+                  <b>生效摘要:</b><br />
+                  {validRows.map((r, i) => (
+                    <div key={i}>
+                      • {nurseName(r.nurse_uid)} {r.start_date} ~ {r.end_date} 若上班只能排 {r.allowed_shifts.join("/")}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div style={{ marginTop:16, display:"flex", justifyContent:"flex-end", gap:8 }}>
-                <button onClick={() => setSpecialFillOpen(false)}
+                <button onClick={() => setRestrictModalOpen(false)}
                   style={{ padding:"8px 16px", borderRadius:8, background:"#fff", border:"1px solid #d1d5db", cursor:"pointer", color:"#374151", fontSize:13 }}>取消</button>
                 <button onClick={applyAll}
-                  disabled={totalCells === 0}
-                  style={{ padding:"8px 16px", borderRadius:8, background: totalCells > 0 ? "#7c3aed" : "#d1d5db", border:"none", cursor: totalCells > 0 ? "pointer" : "not-allowed", color:"#fff", fontSize:13, fontWeight:600 }}>
-                  套用 ({totalCells})
+                  style={{ padding:"8px 16px", borderRadius:8, background:"#7c3aed", border:"none", cursor:"pointer", color:"#fff", fontSize:13, fontWeight:600 }}>
+                  儲存 ({validRows.length})
                 </button>
-              </div>
-
-              <div style={{ marginTop:8, fontSize:11, color:"#9ca3af" }}>
-                可用班別:{allShifts.map(s => s.code).join(" / ")}
               </div>
             </div>
           </div>

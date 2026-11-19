@@ -410,6 +410,22 @@ export default function NursePage() {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadAll(); }, []);
+  // 本期多休名單:每 10 秒輪詢 /rules 同步 wantMoreOff
+  // (管理員從管理員介面把我加入/移出名單時,10 秒內自動更新我的勾選框)
+  useEffect(() => {
+    if (!user?.uid) return;
+    const poll = async () => {
+      try {
+        const { data } = await api.get("/rules");
+        const r = data.rules ?? {};
+        const list: string[] = Array.isArray(r.extra_off_this_cycle) ? r.extra_off_this_cycle : [];
+        const next = list.includes(user.uid);
+        setWantMoreOff(prev => prev === next ? prev : next);
+      } catch {}
+    };
+    const id = setInterval(poll, 10000);
+    return () => clearInterval(id);
+  }, [user?.uid]);
   useEffect(() => { daysRef.current = days; }, [days]);
   useEffect(() => { ctrlSelectedRef.current = ctrlSelected; }, [ctrlSelected]);
   useEffect(() => { shiftRangeRef.current = shiftRange; }, [shiftRange]);

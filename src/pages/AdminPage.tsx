@@ -289,6 +289,25 @@ export default function AdminPage() {
   const [forbiddenPairs, setForbiddenPairs] = useState<ForbiddenPair[]>([]);
   // 本期多餘 OFF 優先分配(當月限定,排完後可清空)
   const [extraOffThisCycle, setExtraOffThisCycle] = useState<string[]>([]);
+  // 本期多休名單:在排班規則 tab 時每 10 秒輪詢同步護理師那端的勾選
+  useEffect(() => {
+    if (tab !== "rules") return;
+    const poll = async () => {
+      try {
+        const { data } = await api.get("/rules");
+        const r = data.rules ?? {};
+        if (Array.isArray(r.extra_off_this_cycle)) {
+          setExtraOffThisCycle(prev => {
+            const next: string[] = r.extra_off_this_cycle;
+            if (prev.length === next.length && prev.every((v, i) => v === next[i])) return prev;
+            return next;
+          });
+        }
+      } catch {}
+    };
+    const id = setInterval(poll, 10000);
+    return () => clearInterval(id);
+  }, [tab]);
   const [pairModalOpen, setPairModalOpen] = useState(false);
   const [pairDraft, setPairDraft] = useState<ForbiddenPair[]>([]);
   const multiDragRef = useRef<{ active: boolean; started: boolean; removeMode: boolean } | null>(null);

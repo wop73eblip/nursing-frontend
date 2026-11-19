@@ -2224,7 +2224,7 @@ export default function AdminPage() {
                           background: prevCycleMode ? "#dbeafe" : undefined,
                         }}>
                         {attrShort(u.attr) || "—"}
-                        {prevCycleMode && prevCycleCounts[u.uid] && (
+                        {prevCycleCounts[u.uid] && (
                           <div style={{ fontSize:9, color:"#1e40af", fontWeight:700, marginTop:1, lineHeight:1 }}>
                             {prevCycleCounts[u.uid].D || 0}/{prevCycleCounts[u.uid].E || 0}/{prevCycleCounts[u.uid].N || 0}
                           </div>

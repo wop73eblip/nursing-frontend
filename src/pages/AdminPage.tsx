@@ -1491,9 +1491,21 @@ export default function AdminPage() {
   // ── 規則儲存
   async function saveCycle() {
     try {
-      await api.post("/rules", { rules: { cycle } });
-      setSavedCycle(cycle);   // 儲存成功後才更新一鍵生成頁籤顯示的快照
-      showToast("✓ 週期設定已儲存");
+      // 若 cycle 的起或迄日期變了,視為「換週期」,順便清空本期多休名單
+      const cycleChanged = !!savedCycle && (
+        savedCycle.start_date !== cycle.start_date ||
+        savedCycle.end_date   !== cycle.end_date
+      );
+      const payload: any = { cycle };
+      if (cycleChanged) payload.extra_off_this_cycle = [];
+      await api.post("/rules", { rules: payload });
+      setSavedCycle(cycle);
+      if (cycleChanged) {
+        setExtraOffThisCycle([]);
+        showToast("✓ 週期設定已儲存(本期多休名單已自動清空)");
+      } else {
+        showToast("✓ 週期設定已儲存");
+      }
     } catch (err: any) {
       const msg = err.response?.data?.detail ?? err.response?.statusText ?? err.message ?? "儲存失敗";
       showToast(`✗ ${msg}`, false);

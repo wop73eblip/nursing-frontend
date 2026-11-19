@@ -4853,9 +4853,28 @@ export default function AdminPage() {
                         <td style={{ ...tdC, fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{nurseName}</td>
                         <td style={{ ...tdC, fontSize:12, color:"#374151" }}>{logDate}</td>
                         <td style={{ ...tdC }}>
-                          {log.shift
-                            ? <span style={{ fontWeight:700, fontSize:12, color: isOff(log.shift, allOffShifts)?"#dc2626":"#111827" }}>{log.shift}</span>
-                            : <span style={{ color:"#d1d5db" }}>─</span>}
+                          {(() => {
+                            const before = (log as any).before_shift as (string | null | undefined);
+                            const after  = log.shift as (string | null | undefined);
+                            const bLbl = before ? before : "─";
+                            const aLbl = after  ? after  : "─";
+                            const bCol = before ? (isOff(before, allOffShifts) ? "#dc2626" : "#111827") : "#d1d5db";
+                            const aCol = after  ? (isOff(after,  allOffShifts) ? "#dc2626" : "#111827") : "#d1d5db";
+                            // 只有 edit action 且 before !== after 時顯示 →;confirm/unconfirm 或無變動只顯示現值
+                            const showArrow = log.action === "edit" && (before ?? null) !== (after ?? null);
+                            if (!showArrow) {
+                              return after
+                                ? <span style={{ fontWeight:700, fontSize:12, color:aCol }}>{aLbl}</span>
+                                : <span style={{ color:"#d1d5db" }}>─</span>;
+                            }
+                            return (
+                              <span style={{ fontSize:12, fontWeight:700, whiteSpace:"nowrap" }}>
+                                <span style={{ color:bCol }}>{bLbl}</span>
+                                <span style={{ color:"#9ca3af", margin:"0 4px", fontWeight:400 }}>→</span>
+                                <span style={{ color:aCol }}>{aLbl}</span>
+                              </span>
+                            );
+                          })()}
                         </td>
                       </tr>
                     );

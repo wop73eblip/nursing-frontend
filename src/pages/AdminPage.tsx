@@ -287,6 +287,8 @@ export default function AdminPage() {
   // 王不見王:兩位護理師不能同一天同一班(或同一天)
   interface ForbiddenPair { a_uid: string; b_uid: string; mode: "same_shift"|"same_day"; start_date?: string; end_date?: string; }
   const [forbiddenPairs, setForbiddenPairs] = useState<ForbiddenPair[]>([]);
+  // 本期多餘 OFF 優先分配(當月限定,排完後可清空)
+  const [extraOffThisCycle, setExtraOffThisCycle] = useState<string[]>([]);
   const [pairModalOpen, setPairModalOpen] = useState(false);
   const [pairDraft, setPairDraft] = useState<ForbiddenPair[]>([]);
   const multiDragRef = useRef<{ active: boolean; started: boolean; removeMode: boolean } | null>(null);
@@ -1125,6 +1127,7 @@ export default function AdminPage() {
       if (r.prev_cycle_counts) setPrevCycleCounts(r.prev_cycle_counts);
       if (r.shift_restrictions && Array.isArray(r.shift_restrictions)) setShiftRestrictions(r.shift_restrictions);
       if (r.forbidden_pairs && Array.isArray(r.forbidden_pairs)) setForbiddenPairs(r.forbidden_pairs);
+      if (r.extra_off_this_cycle && Array.isArray(r.extra_off_this_cycle)) setExtraOffThisCycle(r.extra_off_this_cycle);
       if (r.shifts?.work) { setWorkShifts(r.shifts.work); setEditWorkShifts(r.shifts.work); }
       if (r.shifts?.rest) { setRestShifts(r.shifts.rest); setEditRestShifts(r.shifts.rest); }
       if (r.shifts?.off)  { setOffShifts(r.shifts.off);  setEditOffShifts(r.shifts.off);   }
@@ -2842,37 +2845,89 @@ export default function AdminPage() {
         {tab === "rules" && (
           <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth:740 }}>
 
-            {/* 週期內應休天數 */}
+            {/* 休假天數(週期內應休天數 + 多餘 OFF 分配) */}
             <div className="card">
+              <div className="card-head"><div style={{ fontSize:16, fontWeight:700 }}>🏖 休假天數</div></div>
               <div className="card-body">
-                <div className="setting-section" style={{ marginBottom:0 }}>
-                  <div className="setting-title">🗓 週期內應休天數</div>
-                  <div style={{ maxWidth:280 }}>
-                    <label className="flabel">本週期國定假日天數（0 ～ 5 天）</label>
-                    <NumInput className="finput" min={0} max={5} value={cycle.holiday_days}
-                      onChange={n => setCycle(p=>({...p,holiday_days:n}))} />
-                  </div>
-                  <div style={{ marginTop:12, display:"flex", gap:14, flexWrap:"wrap" }}>
-                    <div style={{ padding:"12px 16px", background:"#dcfce7", borderRadius:10, border:"1px solid #bbf7d0", minWidth:175 }}>
-                      <div style={{ fontSize:12, color:"#15803d", fontWeight:600, marginBottom:4 }}>全職應休天數</div>
-                      <div style={{ fontSize:28, fontWeight:800, color:"#15803d" }}>{fullTimeOff} 天</div>
-                      <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>= 8 + {cycle.holiday_days} 國定假日</div>
+                <div className="fl">
+
+                  <div className="setting-section">
+                    <div className="setting-title">🗓 週期內應休天數</div>
+                    <div style={{ maxWidth:280 }}>
+                      <label className="flabel">本週期國定假日天數（0 ～ 5 天）</label>
+                      <NumInput className="finput" min={0} max={5} value={cycle.holiday_days}
+                        onChange={n => setCycle(p=>({...p,holiday_days:n}))} />
                     </div>
-                    <div style={{ padding:"12px 16px", background:"#fef3c7", borderRadius:10, border:"1px solid #fde68a", minWidth:175 }}>
-                      <div style={{ fontSize:12, color:"#92400e", fontWeight:600, marginBottom:4 }}>半職應休天數</div>
-                      <div style={{ fontSize:28, fontWeight:800, color:"#92400e" }}>{partTimeOffExact} 天</div>
-                      <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>= 28 − (160 − {cycle.holiday_days}×8)÷2÷8</div>
+                    <div style={{ marginTop:12, display:"flex", gap:14, flexWrap:"wrap" }}>
+                      <div style={{ padding:"12px 16px", background:"#dcfce7", borderRadius:10, border:"1px solid #bbf7d0", minWidth:175 }}>
+                        <div style={{ fontSize:12, color:"#15803d", fontWeight:600, marginBottom:4 }}>全職應休天數</div>
+                        <div style={{ fontSize:28, fontWeight:800, color:"#15803d" }}>{fullTimeOff} 天</div>
+                        <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>= 8 + {cycle.holiday_days} 國定假日</div>
+                      </div>
+                      <div style={{ padding:"12px 16px", background:"#fef3c7", borderRadius:10, border:"1px solid #fde68a", minWidth:175 }}>
+                        <div style={{ fontSize:12, color:"#92400e", fontWeight:600, marginBottom:4 }}>半職應休天數</div>
+                        <div style={{ fontSize:28, fontWeight:800, color:"#92400e" }}>{partTimeOffExact} 天</div>
+                        <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>= 28 − (160 − {cycle.holiday_days}×8)÷2÷8</div>
+                      </div>
+                      <div style={{ padding:"12px 16px", background:"#eff6ff", borderRadius:10, border:"1px solid #bfdbfe", minWidth:175 }}>
+                        <div style={{ fontSize:12, color:"#1d4ed8", fontWeight:600, marginBottom:4 }}>半職可上天數（試算用）</div>
+                        <div style={{ fontSize:28, fontWeight:800, color:"#1d4ed8" }}>{partTimeWork} 天</div>
+                        <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>小數點無條件捨去</div>
+                      </div>
                     </div>
-                    <div style={{ padding:"12px 16px", background:"#eff6ff", borderRadius:10, border:"1px solid #bfdbfe", minWidth:175 }}>
-                      <div style={{ fontSize:12, color:"#1d4ed8", fontWeight:600, marginBottom:4 }}>半職可上天數（試算用）</div>
-                      <div style={{ fontSize:28, fontWeight:800, color:"#1d4ed8" }}>{partTimeWork} 天</div>
-                      <div style={{ fontSize:11, color:"#6b7280", marginTop:4 }}>小數點無條件捨去</div>
+                    <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:14 }}>
+                      <button className="btn btn-primary" onClick={saveCycle}>儲存</button>
+                      <span style={{ fontSize:12, color:"#9ca3af" }}>修改國定假日天數後請按儲存</span>
                     </div>
                   </div>
-                  <div style={{ marginTop:12, display:"flex", alignItems:"center", gap:14 }}>
-                    <button className="btn btn-primary" onClick={saveCycle}>儲存</button>
-                    <span style={{ fontSize:12, color:"#9ca3af" }}>修改國定假日天數後請按儲存</span>
+
+                  <div className="setting-section">
+                    <div className="setting-title">🎁 多餘 OFF 分配(本期限定)</div>
+                    <div style={{ fontSize:12, color:"#6b7280", marginBottom:10, lineHeight:1.6 }}>
+                      人力過剩時,系統會把多餘 OFF <b>優先</b>分給下方名單內的人。本期限定,排完班後可清空再開始下期。
+                    </div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:6, padding:"10px 12px", border:"1px dashed #d1d5db", borderRadius:8, minHeight:60, background:"#fafafa", marginBottom:10 }}>
+                      {extraOffThisCycle.length === 0 && (
+                        <span style={{ fontSize:12, color:"#9ca3af", alignSelf:"center" }}>目前沒有指定(人力過剩時將依班屬平均分配)</span>
+                      )}
+                      {extraOffThisCycle.map(uid => {
+                        const u = nurseUsers.find(x => x.uid === uid);
+                        if (!u) return null;
+                        return (
+                          <span key={uid} style={{ display:"inline-flex", alignItems:"center", gap:4, padding:"4px 10px", background:"#dbeafe", color:"#1e40af", borderRadius:14, fontSize:12 }}>
+                            {u.name || uid}
+                            <span onClick={() => setExtraOffThisCycle(p => p.filter(x => x !== uid))}
+                              style={{ cursor:"pointer", fontWeight:700, marginLeft:2 }}>×</span>
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                      <select value="" onChange={e => {
+                        const v = e.target.value;
+                        if (v && !extraOffThisCycle.includes(v)) setExtraOffThisCycle(p => [...p, v]);
+                      }} style={{ padding:"7px 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, fontFamily:"inherit", maxWidth:200 }}>
+                        <option value="">+ 新增護理師…</option>
+                        {nurseUsers.filter(u => !extraOffThisCycle.includes(u.uid)).map(u => (
+                          <option key={u.uid} value={u.uid}>{u.name || u.uid}{u.halftime ? " (半)" : ""}</option>
+                        ))}
+                      </select>
+                      <button className="btn btn-primary" onClick={() => {
+                        api.post("/rules", { rules: { extra_off_this_cycle: extraOffThisCycle } })
+                          .then(() => showToast(`✓ 已儲存 ${extraOffThisCycle.length} 人`))
+                          .catch(() => showToast("✗ 儲存失敗", false));
+                      }}>儲存名單</button>
+                      {extraOffThisCycle.length > 0 && (
+                        <button className="btn" onClick={() => {
+                          if (!confirm("確定清空本期多休名單?")) return;
+                          setExtraOffThisCycle([]);
+                          api.post("/rules", { rules: { extra_off_this_cycle: [] } })
+                            .then(() => showToast("✓ 已清空"));
+                        }} style={{ background:"#fee2e2", color:"#b91c1c", borderColor:"#fecaca" }}>清空</button>
+                      )}
+                    </div>
                   </div>
+
                 </div>
               </div>
             </div>

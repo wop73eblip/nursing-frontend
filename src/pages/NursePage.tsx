@@ -293,6 +293,9 @@ export default function NursePage() {
   const [lockFirstDay, setLockFirstDay] = useState(true);
   const [restrictFirstWeekend, setRestrictFirstWeekend] = useState(true);
   const [maxPredDays, setMaxPredDays] = useState(0);   // 預班上限（白班/小夜/大夜/OFF 天數），0＝不限
+  // 本期「願意多放假」(當月限定,排完清空)
+  const [wantMoreOff, setWantMoreOff] = useState(false);
+  const [wantMoreOffBusy, setWantMoreOffBusy] = useState(false);
 
   // 滑動選取
   const swipeRef  = useRef<{ startDate: string; dates: Set<string>; active: boolean } | null>(null);
@@ -496,6 +499,9 @@ export default function NursePage() {
       setLockFirstDay(r.scheduling?.lock_first_day ?? true);
       setRestrictFirstWeekend(r.scheduling?.restrict_first_weekend ?? true);
       setMaxPredDays(Number(r.scheduling?.max_off_days ?? 0));
+      // 本期「願意多放假」名單:判斷自己是否已在裡面
+      const _exList: string[] = Array.isArray(r.extra_off_this_cycle) ? r.extra_off_this_cycle : [];
+      setWantMoreOff(_exList.includes(user.uid));
 
       let cycleStart = r.cycle?.start_date ?? "";
       let cycleEnd   = r.cycle?.end_date   ?? "";
@@ -1105,7 +1111,36 @@ export default function NursePage() {
       <div className="np-body">
 
         {/* ── 預班表格 */}
-        {npTab === "schedule" && <div className="xcard">
+        {npTab === "schedule" && <>
+        {/* 本期「願意多放假」勾選區(當月限定、排完清空) */}
+        {!iAmAdminStaff && (
+          <div style={{ background:"#fef3c7", border:"1px solid #fcd34d", borderRadius:10, padding:"12px 14px", marginBottom:12, display:"flex", alignItems:"flex-start", gap:12 }}>
+            <input type="checkbox" checked={wantMoreOff} disabled={wantMoreOffBusy}
+              onChange={async e => {
+                const next = e.target.checked;
+                setWantMoreOffBusy(true);
+                const prev = wantMoreOff;
+                setWantMoreOff(next);
+                try {
+                  await api.post("/my-extra-off", { enabled: next });
+                  showToast(next ? "✓ 已登記本期想多放假" : "✓ 已取消本期多放假登記");
+                } catch {
+                  setWantMoreOff(prev);
+                  showToast("✗ 儲存失敗,請重試", true);
+                } finally {
+                  setWantMoreOffBusy(false);
+                }
+              }}
+              style={{ width:18, height:18, marginTop:1, accentColor:"#d97706", cursor:"pointer" }} />
+            <div>
+              <div style={{ fontSize:14, fontWeight:600, color:"#78350f" }}>這個月我想多放假</div>
+              <div style={{ fontSize:12, color:"#92400e", marginTop:3, lineHeight:1.5 }}>
+                只有這期有效,下期可再重新設定。<br/>勾選後,人力若過剩會優先分配 OFF 給你。
+              </div>
+            </div>
+          </div>
+        )}
+        <div className="xcard">
           <div className="month-bar">
             <div>
               <div style={{ fontSize: 15, fontWeight: 700 }}>本期預班表</div>
@@ -1315,7 +1350,8 @@ export default function NursePage() {
               填寫完成後請按「確認送出」通知管理員
             </span>
           </div>
-        </div>}
+        </div>
+        </>}
 
         {/* ── 個人設定 */}
         {npTab === "settings" && <div className="xcard">

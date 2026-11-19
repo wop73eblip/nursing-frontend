@@ -4834,9 +4834,21 @@ export default function AdminPage() {
                           </div>
                         </td>
                         <td style={{ ...tdC, fontSize:12 }}>
-                          {log.action==="confirm" ? <span style={{ color:"#16a34a", fontWeight:700 }}>✓確認</span>
-                            : log.action==="unconfirm" ? <span style={{ color:"#f59e0b", fontWeight:700 }}>↩取消</span>
-                            : <span style={{ color:"#6b7280" }}>編輯</span>}
+                          {(() => {
+                            const meta: Record<string, { label: string; color: string; desc: string }> = {
+                              confirm:   { label:"✓確認", color:"#16a34a", desc:"確認該日預班內容,狀態鎖定(未確認:橘黃色邊框 → 確認:實心綠色)" },
+                              unconfirm: { label:"↩取消", color:"#f59e0b", desc:"取消已確認狀態,該格回到可編輯的「未確認」狀態" },
+                              edit:      { label:"編輯",   color:"#6b7280", desc:"設定或變更該日的班別內容(含預填/改班/清除)" },
+                            };
+                            const m = meta[log.action] ?? { label: log.action, color:"#6b7280", desc:`動作:${log.action}` };
+                            return (
+                              <span
+                                title={m.desc}
+                                onClick={() => showToast(`${m.label}:${m.desc}`)}
+                                style={{ color:m.color, fontWeight:700, cursor:"help", textDecoration:"underline dotted", textUnderlineOffset:3 }}
+                              >{m.label}</span>
+                            );
+                          })()}
                         </td>
                         <td style={{ ...tdC, fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{nurseName}</td>
                         <td style={{ ...tdC, fontSize:12, color:"#374151" }}>{logDate}</td>

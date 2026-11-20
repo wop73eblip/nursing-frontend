@@ -4795,6 +4795,22 @@ export default function AdminPage() {
                 </select>
               </div>
             </div>
+            {/* 動作圖例 */}
+            <div style={{ padding:"10px 14px", borderBottom:"1px solid #f3f4f6", background:"#fafbfc", display:"flex", flexWrap:"wrap", gap:"6px 14px", fontSize:12, alignItems:"center" }}>
+              <span style={{ color:"#6b7280", fontWeight:600 }}>動作圖例:</span>
+              {[
+                { label:"➕新填", color:"#2563eb", desc:"原本沒班別 → 新填入" },
+                { label:"✎更改", color:"#9333ea", desc:"原有班別 → 改為不同班別" },
+                { label:"✖清除", color:"#dc2626", desc:"原有班別 → 清空" },
+                { label:"✓確認", color:"#16a34a", desc:"確認該日預班,狀態鎖定" },
+                { label:"↩取消", color:"#f59e0b", desc:"取消已確認狀態" },
+              ].map(it => (
+                <span key={it.label} title={it.desc} style={{ display:"inline-flex", alignItems:"center", gap:4, cursor:"help" }}>
+                  <span style={{ color:it.color, fontWeight:700, textDecoration:"underline dotted", textUnderlineOffset:3 }}>{it.label}</span>
+                  <span style={{ color:"#9ca3af" }}>{it.desc}</span>
+                </span>
+              ))}
+            </div>
             <div style={{ overflowX:"auto", overflowY:"auto", maxHeight:"65vh" }}>
               <table style={{ width:"100%", borderCollapse:"collapse", tableLayout:"fixed", minWidth:320 }}>
                 <colgroup>

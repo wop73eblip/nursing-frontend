@@ -4835,12 +4835,25 @@ export default function AdminPage() {
                         </td>
                         <td style={{ ...tdC, fontSize:12 }}>
                           {(() => {
-                            const meta: Record<string, { label: string; color: string; desc: string }> = {
-                              confirm:   { label:"✓確認", color:"#16a34a", desc:"確認該日預班內容,狀態鎖定(未確認:橘黃色邊框 → 確認:實心綠色)" },
-                              unconfirm: { label:"↩取消", color:"#f59e0b", desc:"取消已確認狀態,該格回到可編輯的「未確認」狀態" },
-                              edit:      { label:"編輯",   color:"#6b7280", desc:"設定或變更該日的班別內容(含預填/改班/清除)" },
-                            };
-                            const m = meta[log.action] ?? { label: log.action, color:"#6b7280", desc:`動作:${log.action}` };
+                            const before = (log as any).before_shift as (string | null | undefined);
+                            const after  = log.shift as (string | null | undefined);
+                            const hasB = !!before;
+                            const hasA = !!after;
+                            // edit action 再細分:新填入 / 更改 / 清除 / 無變動
+                            let m: { label: string; color: string; desc: string };
+                            if (log.action === "confirm") {
+                              m = { label:"✓確認", color:"#16a34a", desc:"確認該日預班內容,狀態鎖定(未確認:橘黃色邊框 → 確認:實心綠色)" };
+                            } else if (log.action === "unconfirm") {
+                              m = { label:"↩取消", color:"#f59e0b", desc:"取消已確認狀態,該格回到可編輯的「未確認」狀態" };
+                            } else if (log.action === "edit") {
+                              if (!hasB && hasA)        m = { label:"➕新填", color:"#2563eb", desc:"該日原本沒有班別,這次新填入一個班別" };
+                              else if (hasB && !hasA)   m = { label:"✖清除", color:"#dc2626", desc:"該日原本有班別,這次被清除為空白" };
+                              else if (hasB && hasA && before !== after)
+                                                        m = { label:"✎更改", color:"#9333ea", desc:"該日原本已有班別,這次改為不同的班別" };
+                              else                      m = { label:"編輯",   color:"#6b7280", desc:"設定或變更該日的班別內容(前後值相同,可能來自舊紀錄或無差異的覆寫)" };
+                            } else {
+                              m = { label: log.action, color:"#6b7280", desc:`動作:${log.action}` };
+                            }
                             return (
                               <span
                                 title={m.desc}

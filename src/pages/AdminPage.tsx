@@ -1610,10 +1610,14 @@ export default function AdminPage() {
       return;
     }
     const cycDays: string[] = [];
-    const sD = new Date(cycle.start_date + "T00:00:00");
-    const eD = new Date(cycle.end_date + "T00:00:00");
-    for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) {
-      cycDays.push(d.toISOString().slice(0, 10));
+    // 用字串直接遞增避免 toISOString() 的時區偏移(台灣 UTC+8 會 -1 天)
+    const [sy, sm, sd0] = cycle.start_date.split("-").map(Number);
+    const [ey, em, ed0] = cycle.end_date.split("-").map(Number);
+    const d0 = new Date(sy, sm - 1, sd0);
+    const d1 = new Date(ey, em - 1, ed0);
+    const fmt = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`;
+    for (let d = new Date(d0); d <= d1; d.setDate(d.getDate() + 1)) {
+      cycDays.push(fmt(d));
     }
     const nurses = schedulableNurses.filter(u => !u.is_trainee);
     const schedByUid: Record<string, Record<string, string>> = {};

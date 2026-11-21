@@ -294,6 +294,8 @@ export default function AdminPage() {
   const [termDialog, setTermDialog] = useState<{ uid: string; date: string } | null>(null);
   // 離職 cascade 確認(含已確認班別清空)
   const [termConfirm, setTermConfirm] = useState<{ uid: string; name: string; date: string; confirmedCount: number } | null>(null);
+  // 預班健檢結果
+  const [healthResult, setHealthResult] = useState<{ critical: string[]; warning: string[]; info: string[] } | null>(null);
   // 本期多休名單:在排班規則 tab 時每 10 秒輪詢同步護理師那端的勾選
   useEffect(() => {
     if (tab !== "rules") return;
@@ -1595,6 +1597,135 @@ export default function AdminPage() {
     } catch (err: any) {
       showToast(`✗ ${err.response?.data?.detail ?? err.message ?? "設定失敗"}`, false);
     }
+  }
+
+  // ─── 預班健檢:掃描 schedule + users + cycle 找違規 ─────────
+  function runHealthCheck() {
+    const critical: string[] = [];
+    const warning: string[] = [];
+    const info: string[] = [];
+    if (!cycle.start_date || !cycle.end_date) {
+      critical.push("尚未設定排班週期日期");
+      setHealthResult({ critical, warning, info });
+      return;
+    }
+    const cycDays: string[] = [];
+    const sD = new Date(cycle.start_date + "T00:00:00");
+    const eD = new Date(cycle.end_date + "T00:00:00");
+    for (let d = new Date(sD); d <= eD; d.setDate(d.getDate() + 1)) {
+      cycDays.push(d.toISOString().slice(0, 10));
+    }
+    const nurses = schedulableNurses.filter(u => !u.is_trainee);
+    const schedByUid: Record<string, Record<string, string>> = {};
+    const confSet = new Set<string>();   // "uid|date" for confirmed shifts
+    for (const r of schedule) {
+      if (!cycDays.includes(r.date)) continue;
+      if (!r.shift) continue;
+      (schedByUid[r.nurse_uid] ||= {})[r.date] = r.shift;
+      if (r.confirmed) confSet.add(`${r.nurse_uid}|${r.date}`);
+    }
+    const workCodes = new Set(["D","E","N"]);
+    const restCodes = new Set(["OFF","半"]);
+    const leaveAdjust = new Set(offShifts.filter(s => s.code !== "OFF" && s.code !== "半").map(s => s.code));
+    const attrAllowed: Record<string, Set<string>> = {
+      "固定D": new Set(["D"]), "固定E": new Set(["E"]), "固定N": new Set(["N"]),
+      "輪班DE": new Set(["D","E"]), "輪班EN": new Set(["E","N"]), "輪班DN": new Set(["D","N"]),
+      "輪班DEN": new Set(["D","E","N"]),
+    };
+    const max_consec = rulesForm.max_consecutive_work ?? 5;
+    const one_in_seven = rulesForm.one_in_seven ?? true;
+    const weekly_max_off_total = rulesForm.weekly_max_off_total ?? 3;
+    let totalEmpty = 0;
+    let totalFilled = 0;
+    for (const u of nurses) {
+      const sch = schedByUid[u.uid] || {};
+      const termAt = u.terminated_at;
+      // 可用天數範圍
+      const effCycDays = termAt ? cycDays.filter(d => d <= termAt) : cycDays;
+      // 填寫率
+      for (const d of effCycDays) {
+        if (sch[d]) totalFilled++; else totalEmpty++;
+      }
+      // 連續上班
+      let streak = 0;
+      let streakStart: string | null = null;
+      for (const d of effCycDays) {
+        const s = sch[d] || "";
+        if (workCodes.has(s) || leaveAdjust.has(s) === false && s !== "" && !restCodes.has(s)) {
+          // workCodes OR admin 類(非 rest 非 LA 非 workCodes 的 D/E/N 替代)
+          if (workCodes.has(s) || (!restCodes.has(s) && !leaveAdjust.has(s) && s)) {
+            if (streak === 0) streakStart = d;
+            streak++;
+            if (streak > max_consec) {
+              critical.push(`【連續上班超過 ${max_consec} 天】${u.name} ${streakStart}~${d}(連 ${streak} 天)`);
+              break;
+            }
+          }
+        } else {
+          streak = 0; streakStart = null;
+        }
+      }
+      // 反向班(E→D、N→E、N→D 需隔 1-2 天 OFF)
+      for (let i = 0; i < effCycDays.length - 1; i++) {
+        const s1 = sch[effCycDays[i]]; const s2 = sch[effCycDays[i+1]];
+        if (!s1 || !s2) continue;
+        if (s1 === "E" && s2 === "D") critical.push(`【反向班 E→D】${u.name} ${effCycDays[i]}→${effCycDays[i+1]}(需隔 1 天 OFF)`);
+        if (s1 === "N" && s2 === "E") critical.push(`【反向班 N→E】${u.name} ${effCycDays[i]}→${effCycDays[i+1]}(需隔 1 天 OFF)`);
+        if (s1 === "N" && s2 === "D") critical.push(`【反向班 N→D】${u.name} ${effCycDays[i]}→${effCycDays[i+1]}(需隔 2 天 OFF)`);
+      }
+      for (let i = 0; i < effCycDays.length - 2; i++) {
+        const s1 = sch[effCycDays[i]]; const s3 = sch[effCycDays[i+2]];
+        if (s1 === "N" && s3 === "D") {
+          warning.push(`【反向班 N→D(隔 1 天)】${u.name} ${effCycDays[i]}→${effCycDays[i+2]}(需隔 2 天)`);
+        }
+      }
+      // 屬性衝突
+      const allowed = attrAllowed[u.attr];
+      if (allowed) {
+        for (const d of effCycDays) {
+          const s = sch[d];
+          if (!s) continue;
+          if (workCodes.has(s) && !allowed.has(s)) {
+            const isConf = confSet.has(`${u.uid}|${d}`);
+            warning.push(`【屬性衝突】${u.name}(${u.attr})${d} ${isConf ? "已確認" : "預填"} ${s} 班(系統會由例外機制接受,但可能擠壓其他規則)`);
+          }
+        }
+      }
+      // 每週檢查(以 cycle 開始為基準 7 天一組)
+      for (let wi = 0; wi < effCycDays.length; wi += 7) {
+        const week = effCycDays.slice(wi, Math.min(wi + 7, effCycDays.length));
+        if (week.length < 7) continue;   // 不完整週略過
+        const kinds = new Set<string>();
+        let offCount = 0;
+        for (const d of week) {
+          const s = sch[d];
+          if (!s) continue;
+          if (workCodes.has(s)) kinds.add(s);
+          if (restCodes.has(s)) offCount++;
+        }
+        if (kinds.size > 2) {
+          critical.push(`【H4 每週 ≤ 2 種班別】${u.name} ${week[0]}~${week[week.length-1]}:${[...kinds].join("/")}(${kinds.size} 種)`);
+        }
+        if (one_in_seven && offCount < 2) {
+          const filled = week.filter(d => sch[d]).length;
+          if (filled >= 5) {
+            warning.push(`【一例一休】${u.name} ${week[0]}~${week[week.length-1]} 僅 ${offCount} 天 OFF(需至少 2)`);
+          }
+        }
+        if (offCount > weekly_max_off_total) {
+          warning.push(`【每週 OFF 超過 ${weekly_max_off_total}】${u.name} ${week[0]}~${week[week.length-1]}:${offCount} 天`);
+        }
+      }
+    }
+    // 統計
+    const total = totalFilled + totalEmpty;
+    const fillRate = total > 0 ? Math.round(totalFilled / total * 100) : 0;
+    info.push(`填寫率:${fillRate}%(已填 ${totalFilled} / 總計 ${total} 格)`);
+    const confCount = Array.from(confSet).length;
+    info.push(`已確認班別數:${confCount} 格`);
+    const termCount = activeTerminated.length;
+    if (termCount > 0) info.push(`離職者:${termCount} 位(班表範圍已按在職日切短)`);
+    setHealthResult({ critical, warning, info });
   }
 
   // 新增/修改前先檢查該日期之後有幾筆已確認班別,若有則跳確認框
@@ -3515,90 +3646,6 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* ─── 🧮 人力試算 ─────────────────────────── */}
-            <div className="card">
-              <div className="card-head">
-                <div style={{ fontSize:16, fontWeight:700 }}>🧮 人力試算</div>
-                {activeTerminated.length > 0 && (
-                  <span style={{ fontSize:11, color:"#92400e", background:"#fef3c7", padding:"2px 8px", borderRadius:10, fontWeight:600 }}>
-                    含 {activeTerminated.length} 位離職
-                  </span>
-                )}
-              </div>
-              <div className="card-body">
-                {!cycleIsSet ? (
-                  <div style={{ fontSize:12, color:"#9ca3af" }}>請先設定排班週期</div>
-                ) : (() => {
-                  const cycleDays = cycleIsSet ? Math.floor((new Date(cycle.end_date + "T00:00:00").getTime() - new Date(cycle.start_date + "T00:00:00").getTime()) / 86400000) + 1 : 0;
-                  const fullDays = Math.max(0, cycleDays - fullTimeOff);
-                  const htDays = partTimeWork;
-                  const fulls = schedulableNurses.filter(u => !u.halftime && !u.is_trainee && !activeTerminated.some(t => t.uid === u.uid));
-                  const hts   = schedulableNurses.filter(u => u.halftime && !u.is_trainee && !activeTerminated.some(t => t.uid === u.uid));
-                  const fullCapacity = fulls.length * fullDays;
-                  const htCapacity   = hts.length * htDays;
-                  // 離職者貢獻範圍
-                  let termMin = 0, termMax = 0;
-                  const termRows = activeTerminated.map(u => {
-                    const eff = effDaysInCycle(u.terminated_at);
-                    const lk = termLookup(eff);
-                    termMin += lk.workMin;
-                    termMax += lk.workMax;
-                    return { u, eff, lk };
-                  });
-                  const totalMin = fullCapacity + htCapacity + termMin;
-                  const totalMax = fullCapacity + htCapacity + termMax;
-                  // 當日需求總和(已在 cycle 讀過;若未讀,fallback 用 rulesForm)
-                  const demand = cycleDays * ((rulesForm.daily_d ?? 3) + (rulesForm.daily_e ?? 3) + (rulesForm.daily_n ?? 3));
-                  const surplusMin = totalMin - demand;
-                  const surplusMax = totalMax - demand;
-                  // 非臨床/請假類已填格數
-                  const nonClinicalShifts = new Set<string>([
-                    ...workShifts.filter(s => s.admin_only || !["D","E","N"].includes(s.code)).map(s => s.code),
-                    ...offShifts.map(s => s.code).filter(c => c !== "OFF" && c !== "半"),
-                  ]);
-                  const nonClinicalCount = schedule.filter(r =>
-                    r.shift && nonClinicalShifts.has(r.shift) &&
-                    r.date >= cycle.start_date && r.date <= cycle.end_date
-                  ).length;
-                  return (
-                    <div style={{ fontSize:13, lineHeight:2 }}>
-                      <div>週期天數:<b>{cycleDays} 天</b></div>
-                      <div>全職 {fulls.length} 人 × 可上 {fullDays} 天 = <b>{fullCapacity}</b></div>
-                      <div>半職 {hts.length} 人 × 可上 {htDays} 天 = <b>{htCapacity}</b></div>
-                      {termRows.map(({ u, eff, lk }) => (
-                        <div key={u.uid} style={{ background:"#eff6ff", borderLeft:"3px solid #3b82f6", padding:"6px 10px", margin:"4px 0", fontSize:12 }}>
-                          <div style={{ color:"#1e40af", fontWeight:600 }}>
-                            {u.name} {u.terminated_at} 離職(上班週期 {eff} 天)
-                          </div>
-                          <div style={{ color:"#1e3a8a", paddingLeft:8 }}>
-                            預估可提供人力:
-                            <b> {lk.workMin === lk.workMax ? `${lk.workMin}` : `${lk.workMin}~${lk.workMax}`} 天</b>
-                          </div>
-                        </div>
-                      ))}
-                      <div style={{ borderTop:"1px solid #f3f4f6", paddingTop:6, marginTop:6 }}>
-                        可提供總人力:<b style={{ fontSize:15 }}>{totalMin === totalMax ? totalMin : `${totalMin}~${totalMax}`}</b> 人日
-                      </div>
-                      <div style={{ color: surplusMin >= 0 ? "#16a34a" : "#dc2626", fontWeight:600 }}>
-                        多餘人力 = {totalMin === totalMax ? totalMin : `${totalMin}~${totalMax}`} − {demand} =
-                        <b style={{ fontSize:15, marginLeft:4 }}>
-                          {surplusMin === surplusMax
-                            ? (surplusMin >= 0 ? `+${surplusMin}` : surplusMin)
-                            : `${surplusMin >= 0 ? "+" : ""}${surplusMin}~${surplusMax >= 0 ? "+" : ""}${surplusMax}`}
-                        </b>
-                      </div>
-                      <div style={{ color:"#6b7280", fontSize:12 }}>
-                        非臨床/請假類已填班別(會/公/書/V/病/延休/調移…):<b>{nonClinicalCount} 格</b>
-                      </div>
-                      <div style={{ marginTop:8, padding:"6px 10px", background:"#f9fafb", borderRadius:6, fontSize:11, color:"#6b7280" }}>
-                        ℹ️ 此為試算參考,僅告知不阻擋排班。若多餘人力為負,solver 會動用 off_slack(少休)自動補齊。
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-
             {/* ─── 🚪 人員去留 ─────────────────────────── */}
             <div className="card">
               <div className="card-head">
@@ -4790,13 +4837,21 @@ export default function AdminPage() {
                       </div>
                     </div>
                   ) : (
-                    <button
-                      className="btn btn-primary"
-                      style={{ alignSelf:"flex-start" }}
-                      disabled={!dCycleIsSet}
-                      onClick={() => setConfirmGenerate(true)}>
-                      一鍵生成排班
-                    </button>
+                    <div style={{ display:"flex", gap:10, alignSelf:"flex-start", flexWrap:"wrap" }}>
+                      <button
+                        className="btn btn-primary"
+                        disabled={!dCycleIsSet}
+                        onClick={() => setConfirmGenerate(true)}>
+                        一鍵生成排班
+                      </button>
+                      <button
+                        className="btn btn-outline"
+                        disabled={!dCycleIsSet}
+                        onClick={runHealthCheck}
+                        title="掃描預班/已確認班別,找出反向班、屬性衝突、連續上班超限、每週 OFF 不足等問題">
+                        🔍 健檢
+                      </button>
+                    </div>
                   )}
 
                   {/* ── 生成結果 */}
@@ -5857,6 +5912,64 @@ export default function AdminPage() {
               <button onClick={() => termDialog.uid && termDialog.date && checkAndTerminate(termDialog.uid, termDialog.date)}
                 disabled={!termDialog.uid || !termDialog.date}
                 style={{ padding:"8px 16px", borderRadius:8, border:"none", fontSize:13, fontWeight:600, cursor: (termDialog.uid && termDialog.date) ? "pointer" : "not-allowed", fontFamily:"inherit", background: (termDialog.uid && termDialog.date) ? "#2563eb" : "#d1d5db", color:"#fff" }}>確定新增</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 預班健檢結果 Dialog */}
+      {healthResult && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:"#fff", borderRadius:14, padding:"18px 20px 14px", width:"100%", maxWidth:560, maxHeight:"85vh", display:"flex", flexDirection:"column", boxShadow:"0 20px 60px rgba(0,0,0,.25)" }}>
+            <div style={{ fontSize:16, fontWeight:700, marginBottom:12, display:"flex", alignItems:"center", gap:8 }}>
+              🔍 預班健檢結果
+              {healthResult.critical.length === 0 && healthResult.warning.length === 0 && (
+                <span style={{ fontSize:12, color:"#16a34a", background:"#dcfce7", padding:"2px 8px", borderRadius:10 }}>✓ 全部通過</span>
+              )}
+            </div>
+            <div style={{ overflowY:"auto", flex:1 }}>
+              {/* 嚴重 */}
+              {healthResult.critical.length > 0 && (
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#dc2626", marginBottom:6 }}>
+                    🔴 嚴重問題({healthResult.critical.length} 筆)
+                  </div>
+                  <ul style={{ margin:0, paddingLeft:20, fontSize:12, color:"#7f1d1d", lineHeight:1.9 }}>
+                    {healthResult.critical.map((msg, i) => <li key={i}>{msg}</li>)}
+                  </ul>
+                </div>
+              )}
+              {/* 警告 */}
+              {healthResult.warning.length > 0 && (
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#d97706", marginBottom:6 }}>
+                    🟡 警告({healthResult.warning.length} 筆)
+                  </div>
+                  <ul style={{ margin:0, paddingLeft:20, fontSize:12, color:"#92400e", lineHeight:1.9 }}>
+                    {healthResult.warning.map((msg, i) => <li key={i}>{msg}</li>)}
+                  </ul>
+                </div>
+              )}
+              {/* 資訊 */}
+              {healthResult.info.length > 0 && (
+                <div>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#2563eb", marginBottom:6 }}>
+                    ℹ️ 統計
+                  </div>
+                  <ul style={{ margin:0, paddingLeft:20, fontSize:12, color:"#1e3a8a", lineHeight:1.9 }}>
+                    {healthResult.info.map((msg, i) => <li key={i}>{msg}</li>)}
+                  </ul>
+                </div>
+              )}
+              {healthResult.critical.length === 0 && healthResult.warning.length === 0 && (
+                <div style={{ padding:20, textAlign:"center", color:"#16a34a", fontSize:13 }}>
+                  ✓ 未發現硬規則違規。但不保證一鍵生成能成功(仍可能受比例、人力池等軟約束限制)。
+                </div>
+              )}
+            </div>
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:8, marginTop:12, paddingTop:10, borderTop:"1px solid #f3f4f6" }}>
+              <button onClick={() => setHealthResult(null)}
+                style={{ padding:"8px 16px", borderRadius:8, border:"none", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", background:"#2563eb", color:"#fff" }}>關閉</button>
             </div>
           </div>
         </div>

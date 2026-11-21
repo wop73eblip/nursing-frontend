@@ -4633,16 +4633,16 @@ export default function AdminPage() {
                           <div>週期天數：<b>{n} 天</b></div>
                           <div>預設每日需求：<b>D{dRules.daily_d}＋E{dRules.daily_e}＋N{dRules.daily_n}＝{defaultDaily} 人</b></div>
                           <div>全職 {fullNurses} 人 × 可上 {n - dFullOff} 天 ＝ {fullNurses * (n - dFullOff)}</div>
+                          <div>需求總人力：<b>{totalRequired}</b>
+                            {specialCount > 0 && <span style={{ color:"#6b7280", fontSize:11 }}>（含 {specialCount} 個特殊日）</span>}
+                          </div>
                           <div>半職 {halfNurses} 人 × 可上 {dPartWork} 天 ＝ {halfNurses * dPartWork}</div>
+                          <div>可提供總人力：<b>{totalAvailableMin === totalAvailableMax ? totalAvailableMin : `${totalAvailableMin}~${totalAvailableMax}`}</b></div>
                           {traineeCount > 0 && (
                             <div style={{ gridColumn:"1 / -1", fontSize:11, color:"#6b7280" }}>
                               另有 <b>{traineeCount}</b> 位新人參與排班（照規則排、跟隨導師）但不計入臨床人力
                             </div>
                           )}
-                          <div>可提供總人力：<b>{totalAvailableMin === totalAvailableMax ? totalAvailableMin : `${totalAvailableMin}~${totalAvailableMax}`}</b></div>
-                          <div>需求總人力：<b>{totalRequired}</b>
-                            {specialCount > 0 && <span style={{ color:"#6b7280", fontSize:11 }}>（含 {specialCount} 個特殊日）</span>}
-                          </div>
                         </div>
                         {/* 離職者細節 */}
                         {termRows.length > 0 && (
@@ -4656,6 +4656,19 @@ export default function AdminPage() {
                             ))}
                           </div>
                         )}
+                        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8 }}>
+                          <div style={{ fontSize:13, color:color.text, fontWeight:600 }}>
+                            多餘人力 ＝ {totalAvailableMin === totalAvailableMax ? totalAvailableMin : `${totalAvailableMin}~${totalAvailableMax}`} － {totalRequired} ＝
+                          </div>
+                          <div style={{
+                            background: color.badge, color:"#fff",
+                            borderRadius:6, padding:"2px 12px", fontSize:16, fontWeight:800,
+                          }}>
+                            {surplusMin === surplusMax
+                              ? (surplusMin >= 0 ? `+${surplusMin}` : surplusMin)
+                              : `${surplusMin >= 0 ? "+" : ""}${surplusMin}~${surplusMax >= 0 ? "+" : ""}${surplusMax}`}
+                          </div>
+                        </div>
                         {/* 非臨床/請假類已填班別統計（僅顯示，不影響多餘人力計算） */}
                         <div style={{ background:"rgba(0,0,0,0.04)", borderRadius:6, padding:"6px 10px", marginBottom:8, fontSize:12, color:"#374151" }}>
                           非臨床／請假類已填班別（D／E／N／OFF／半 以外，如 會／公／書／V／病／延休／調移…）：<b>{specialShiftCount} 格</b>
@@ -4671,19 +4684,6 @@ export default function AdminPage() {
                             ))}
                           </div>
                         )}
-                        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                          <div style={{ fontSize:13, color:color.text, fontWeight:600 }}>
-                            多餘人力 ＝ {totalAvailableMin === totalAvailableMax ? totalAvailableMin : `${totalAvailableMin}~${totalAvailableMax}`} － {totalRequired} ＝
-                          </div>
-                          <div style={{
-                            background: color.badge, color:"#fff",
-                            borderRadius:6, padding:"2px 12px", fontSize:16, fontWeight:800,
-                          }}>
-                            {surplusMin === surplusMax
-                              ? (surplusMin >= 0 ? `+${surplusMin}` : surplusMin)
-                              : `${surplusMin >= 0 ? "+" : ""}${surplusMin}~${surplusMax >= 0 ? "+" : ""}${surplusMax}`}
-                          </div>
-                        </div>
                         {surplus < 0 && (
                           <div style={{ marginTop:8, fontSize:12, color:"#dc2626", fontWeight:600 }}>
                             ⚠ 人力不足 {Math.abs(surplus)} 格，CP-SAT 可能無法生成班表。建議增加護理師人數或減少每日需求。

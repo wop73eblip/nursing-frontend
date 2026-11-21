@@ -34,6 +34,7 @@ interface User {
   uid: string; name: string; role: string; level: string;
   attr: string; halftime: boolean; admin_staff: boolean;
   is_trainee: boolean; mentor_uid: string; note: string; sort_order: number;
+  terminated_at?: string | null;   // 最後上班日(ISO YYYY-MM-DD),null=在職
 }
 interface ShiftRow { nurse_uid: string; date: string; shift: string; confirmed?: boolean; updated_by?: string; }
 
@@ -289,6 +290,10 @@ export default function AdminPage() {
   const [forbiddenPairs, setForbiddenPairs] = useState<ForbiddenPair[]>([]);
   // 本期多餘 OFF 優先分配(當月限定,排完後可清空)
   const [extraOffThisCycle, setExtraOffThisCycle] = useState<string[]>([]);
+  // 離職記錄 dialog
+  const [termDialog, setTermDialog] = useState<{ uid: string; date: string } | null>(null);
+  // 離職 cascade 確認(含已確認班別清空)
+  const [termConfirm, setTermConfirm] = useState<{ uid: string; name: string; date: string; confirmedCount: number } | null>(null);
   // 本期多休名單:在排班規則 tab 時每 10 秒輪詢同步護理師那端的勾選
   useEffect(() => {
     if (tab !== "rules") return;
@@ -633,6 +638,40 @@ export default function AdminPage() {
   nurseUsersRef.current = nurseUsers;
   // 實際參與排班的護理師（排除行政人員 admin_staff，他們只預班、不被一鍵生成）
   const schedulableNurses = nurseUsers.filter(u => !u.admin_staff);
+
+  // ─── 離職者對照表 helper ───────────────────────────────────
+  // eff_days → { min_OFF, max_OFF, workMin, workMax }
+  // 完整在職週:強制 2 OFF(1 例 1 休);partial 6:強制 1 OFF(例假不可省)
+  function termLookup(effDays: number) {
+    if (effDays <= 0) return { minOff: 0, maxOff: 0, workMin: 0, workMax: 0 };
+    const fullWeeks = Math.floor(effDays / 7);
+    const partial = effDays % 7;
+    const minOff = fullWeeks * 2 + (partial === 6 ? 1 : 0);
+    const maxOff = fullWeeks * 2 + Math.min(partial, 2);
+    return {
+      minOff, maxOff,
+      workMin: effDays - maxOff,
+      workMax: effDays - minOff,
+    };
+  }
+
+  // 計算離職者在本週期的 eff_days(以 cycle.start/end 為範圍)
+  function effDaysInCycle(terminatedAt: string | null | undefined): number {
+    if (!terminatedAt || !cycle.start_date || !cycle.end_date) return 0;
+    const term = new Date(terminatedAt + "T00:00:00");
+    const start = new Date(cycle.start_date + "T00:00:00");
+    const end = new Date(cycle.end_date + "T00:00:00");
+    if (term < start) return 0;   // 本週期開始前已離職,不算
+    if (term >= end) return 0;    // 整個週期都在職
+    const diffMs = term.getTime() - start.getTime();
+    return Math.floor(diffMs / 86400000) + 1;
+  }
+
+  // 本週期有效離職者(排除「上週期以前已離職」與「下週期才離職」)
+  const activeTerminated = nurseUsers.filter(u => {
+    const eff = effDaysInCycle(u.terminated_at);
+    return eff > 0;
+  });
 
   // 每日休假人數（只算週期內）
   const dailyOff: Record<string,number> = {};
@@ -1540,6 +1579,42 @@ export default function AdminPage() {
     }
   }
 
+  // ─── 離職:設定 / 清除 terminated_at ──────────────────────
+  async function submitTerminate(uid: string, date: string | null) {
+    try {
+      const { data } = await api.post(`/users/${uid}/terminate`, { terminated_at: date });
+      const n = nurseUsers.find(u => u.uid === uid);
+      if (date) {
+        showToast(`✓ ${n?.name ?? uid} 離職日已設 ${date}${data.deleted_shifts ? `,清除 ${data.deleted_shifts} 筆班別` : ""}`);
+      } else {
+        showToast(`✓ ${n?.name ?? uid} 已取消離職狀態`);
+      }
+      await fetchUsers();
+      setTermDialog(null);
+      setTermConfirm(null);
+    } catch (err: any) {
+      showToast(`✗ ${err.response?.data?.detail ?? err.message ?? "設定失敗"}`, false);
+    }
+  }
+
+  // 新增/修改前先檢查該日期之後有幾筆已確認班別,若有則跳確認框
+  async function checkAndTerminate(uid: string, date: string) {
+    try {
+      // 讀取 schedule 中 date 之後的已確認班別
+      const confirmedAfter = schedule.filter(r =>
+        r.nurse_uid === uid && r.date > date && r.confirmed && r.shift
+      );
+      if (confirmedAfter.length > 0) {
+        const n = nurseUsers.find(u => u.uid === uid);
+        setTermConfirm({ uid, name: n?.name ?? uid, date, confirmedCount: confirmedAfter.length });
+      } else {
+        await submitTerminate(uid, date);
+      }
+    } catch (err: any) {
+      showToast(`✗ ${err.message ?? "設定失敗"}`, false);
+    }
+  }
+
   // 試算各輪班屬性的預估班別天數
   // 從屬性取出輪班代碼列表
   function attrShifts(attr: string): string[] {
@@ -2275,6 +2350,8 @@ export default function AdminPage() {
                         const isSwipeSel  = swipeDates.has(d) && (swipeRef.current?.nurseUid === u.uid || swipePopup?.nurseUid === u.uid);
                         const isAnchor    = shiftAnchor?.nurseUid === u.uid && shiftAnchor.date === d && !shiftRange.size && !ctrlSelected.size;
                         const conflict = !!(row?.shift) && isAttrConflict(row.shift, u.attr);
+                        // 離職日之後的格子:灰底「─」,不可編輯
+                        const isTerm = !!u.terminated_at && d > u.terminated_at;
                         const { cls: baseCls, style } = cellStyle(row?.shift, row?.confirmed, saving.has(key), u.uid, row?.updated_by, conflict);
                         const cls = baseCls
                           + (isCtrlSel   ? " is-ctrl-sel"   : "")
@@ -2283,13 +2360,18 @@ export default function AdminPage() {
                           + (isSwipeSel  ? " is-swipe-sel"  : "")
                           + (isAnchor    ? " is-anchor"     : "");
                         // isRef 時完整覆蓋 style，避免綠色底色/外框
-                        const cellFinalStyle: React.CSSProperties = isRef
-                          ? row?.shift
-                            ? { background: "transparent", border: "1.5px solid transparent", color: "#000000", fontWeight: 700 }
-                            : { background: "transparent", border: "1.5px solid transparent", color: "#555555" }
-                          : style;
+                        // isTerm (離職後):灰底、不可編輯,最高優先覆蓋
+                        const cellFinalStyle: React.CSSProperties = isTerm
+                          ? { background: "#f3f4f6", border: "1.5px solid transparent", color: "#d1d5db", cursor: "not-allowed", fontWeight: 400 }
+                          : isRef
+                            ? row?.shift
+                              ? { background: "transparent", border: "1.5px solid transparent", color: "#000000", fontWeight: 700 }
+                              : { background: "transparent", border: "1.5px solid transparent", color: "#555555" }
+                            : style;
 
                         function handleClick(e: React.MouseEvent) {
+                          // 離職後格子:完全不可點擊
+                          if (isTerm) return;
                           // 剛 touch 完(手機):skip click 避免重複 toggle
                           if (Date.now() - lastTouchTsRef.current < 500) return;
                           // 多選模式:若剛拖曳過,拖曳邏輯已處理,skip click
@@ -2361,21 +2443,22 @@ export default function AdminPage() {
                           });
                         }
                         return (
-                          <td key={d} className={`ap-td-shift${isWe && !isRef ? " we" : ""}`} style={{ background: isRef ? "#fafafa" : undefined }}>
+                          <td key={d} className={`ap-td-shift${isWe && !isRef ? " we" : ""}`} style={{ background: isTerm ? "#f3f4f6" : isRef ? "#fafafa" : undefined }}
+                            title={isTerm ? `${u.name} 已於 ${u.terminated_at} 離職` : undefined}>
                             <span
                               className={cls}
                               style={{ ...cellFinalStyle, touchAction: multiSelectMode ? "none" : undefined }}
                               data-nurse-uid={u.uid}
                               data-date={d}
                               data-shift={row?.shift ?? ""}
-                              onClick={handleClick}
-                              onMouseDown={handleMouseDown}
-                              onMouseEnter={handleMouseEnter}
-                              onTouchStart={handleCellTouchStart}
-                              onTouchMove={handleCellTouchMove}
-                              onTouchEnd={handleCellTouchEnd}
+                              onClick={isTerm ? undefined : handleClick}
+                              onMouseDown={isTerm ? undefined : handleMouseDown}
+                              onMouseEnter={isTerm ? undefined : handleMouseEnter}
+                              onTouchStart={isTerm ? undefined : handleCellTouchStart}
+                              onTouchMove={isTerm ? undefined : handleCellTouchMove}
+                              onTouchEnd={isTerm ? undefined : handleCellTouchEnd}
                             >
-                              {row?.shift ?? "+"}
+                              {isTerm ? "─" : (row?.shift ?? "+")}
                             </span>
                           </td>
                         );
@@ -3429,6 +3512,156 @@ export default function AdminPage() {
                     儲存輪班比例
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* ─── 🧮 人力試算 ─────────────────────────── */}
+            <div className="card">
+              <div className="card-head">
+                <div style={{ fontSize:16, fontWeight:700 }}>🧮 人力試算</div>
+                {activeTerminated.length > 0 && (
+                  <span style={{ fontSize:11, color:"#92400e", background:"#fef3c7", padding:"2px 8px", borderRadius:10, fontWeight:600 }}>
+                    含 {activeTerminated.length} 位離職
+                  </span>
+                )}
+              </div>
+              <div className="card-body">
+                {!cycleIsSet ? (
+                  <div style={{ fontSize:12, color:"#9ca3af" }}>請先設定排班週期</div>
+                ) : (() => {
+                  const cycleDays = cycleIsSet ? Math.floor((new Date(cycle.end_date + "T00:00:00").getTime() - new Date(cycle.start_date + "T00:00:00").getTime()) / 86400000) + 1 : 0;
+                  const fullDays = Math.max(0, cycleDays - fullTimeOff);
+                  const htDays = partTimeWork;
+                  const fulls = schedulableNurses.filter(u => !u.halftime && !u.is_trainee && !activeTerminated.some(t => t.uid === u.uid));
+                  const hts   = schedulableNurses.filter(u => u.halftime && !u.is_trainee && !activeTerminated.some(t => t.uid === u.uid));
+                  const fullCapacity = fulls.length * fullDays;
+                  const htCapacity   = hts.length * htDays;
+                  // 離職者貢獻範圍
+                  let termMin = 0, termMax = 0;
+                  const termRows = activeTerminated.map(u => {
+                    const eff = effDaysInCycle(u.terminated_at);
+                    const lk = termLookup(eff);
+                    termMin += lk.workMin;
+                    termMax += lk.workMax;
+                    return { u, eff, lk };
+                  });
+                  const totalMin = fullCapacity + htCapacity + termMin;
+                  const totalMax = fullCapacity + htCapacity + termMax;
+                  // 當日需求總和(已在 cycle 讀過;若未讀,fallback 用 rulesForm)
+                  const demand = cycleDays * ((rulesForm.daily_d ?? 3) + (rulesForm.daily_e ?? 3) + (rulesForm.daily_n ?? 3));
+                  const surplusMin = totalMin - demand;
+                  const surplusMax = totalMax - demand;
+                  // 非臨床/請假類已填格數
+                  const nonClinicalShifts = new Set<string>([
+                    ...workShifts.filter(s => s.admin_only || !["D","E","N"].includes(s.code)).map(s => s.code),
+                    ...offShifts.map(s => s.code).filter(c => c !== "OFF" && c !== "半"),
+                  ]);
+                  const nonClinicalCount = schedule.filter(r =>
+                    r.shift && nonClinicalShifts.has(r.shift) &&
+                    r.date >= cycle.start_date && r.date <= cycle.end_date
+                  ).length;
+                  return (
+                    <div style={{ fontSize:13, lineHeight:2 }}>
+                      <div>週期天數:<b>{cycleDays} 天</b></div>
+                      <div>全職 {fulls.length} 人 × 可上 {fullDays} 天 = <b>{fullCapacity}</b></div>
+                      <div>半職 {hts.length} 人 × 可上 {htDays} 天 = <b>{htCapacity}</b></div>
+                      {termRows.map(({ u, eff, lk }) => (
+                        <div key={u.uid} style={{ background:"#eff6ff", borderLeft:"3px solid #3b82f6", padding:"6px 10px", margin:"4px 0", fontSize:12 }}>
+                          <div style={{ color:"#1e40af", fontWeight:600 }}>
+                            {u.name} {u.terminated_at} 離職(上班週期 {eff} 天)
+                          </div>
+                          <div style={{ color:"#1e3a8a", paddingLeft:8 }}>
+                            預估可提供人力:
+                            <b> {lk.workMin === lk.workMax ? `${lk.workMin}` : `${lk.workMin}~${lk.workMax}`} 天</b>
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ borderTop:"1px solid #f3f4f6", paddingTop:6, marginTop:6 }}>
+                        可提供總人力:<b style={{ fontSize:15 }}>{totalMin === totalMax ? totalMin : `${totalMin}~${totalMax}`}</b> 人日
+                      </div>
+                      <div style={{ color: surplusMin >= 0 ? "#16a34a" : "#dc2626", fontWeight:600 }}>
+                        多餘人力 = {totalMin === totalMax ? totalMin : `${totalMin}~${totalMax}`} − {demand} =
+                        <b style={{ fontSize:15, marginLeft:4 }}>
+                          {surplusMin === surplusMax
+                            ? (surplusMin >= 0 ? `+${surplusMin}` : surplusMin)
+                            : `${surplusMin >= 0 ? "+" : ""}${surplusMin}~${surplusMax >= 0 ? "+" : ""}${surplusMax}`}
+                        </b>
+                      </div>
+                      <div style={{ color:"#6b7280", fontSize:12 }}>
+                        非臨床/請假類已填班別(會/公/書/V/病/延休/調移…):<b>{nonClinicalCount} 格</b>
+                      </div>
+                      <div style={{ marginTop:8, padding:"6px 10px", background:"#f9fafb", borderRadius:6, fontSize:11, color:"#6b7280" }}>
+                        ℹ️ 此為試算參考,僅告知不阻擋排班。若多餘人力為負,solver 會動用 off_slack(少休)自動補齊。
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* ─── 🚪 人員去留 ─────────────────────────── */}
+            <div className="card">
+              <div className="card-head">
+                <div style={{ fontSize:16, fontWeight:700 }}>🚪 人員去留</div>
+                <span style={{ fontSize:12, color:"#6b7280" }}>離職後不計入排班池</span>
+              </div>
+              <div className="card-body">
+                <div style={{ fontSize:12, color:"#6b7280", marginBottom:10, lineHeight:1.6 }}>
+                  設定本週期內預計離職的護理師,系統會自動把離職日之後的天數從模型中排除。
+                </div>
+                {activeTerminated.length === 0 ? (
+                  <div style={{ padding:20, background:"#f9fafb", borderRadius:8, border:"1px dashed #d1d5db", textAlign:"center" }}>
+                    <div style={{ fontSize:13, color:"#6b7280", marginBottom:10 }}>本週期尚無離職名單</div>
+                    <button className="btn btn-outline" style={{ fontSize:13, padding:"6px 14px" }}
+                      onClick={() => setTermDialog({ uid: "", date: cycle.start_date || "" })}>
+                      ＋ 新增離職記錄
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ background:"#f9fafb", borderRadius:8, padding:2 }}>
+                      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+                        <thead>
+                          <tr style={{ color:"#6b7280", fontSize:12 }}>
+                            <th style={{ textAlign:"left", padding:"8px 12px", fontWeight:500 }}>護理師</th>
+                            <th style={{ textAlign:"center", padding:"8px 12px", fontWeight:500, width:70 }}>職階</th>
+                            <th style={{ textAlign:"center", padding:"8px 12px", fontWeight:500, width:130 }}>最後上班日</th>
+                            <th style={{ textAlign:"center", padding:"8px 12px", fontWeight:500, width:90 }}>在職天數</th>
+                            <th style={{ width:40 }}></th>
+                          </tr>
+                        </thead>
+                        <tbody style={{ background:"#fff" }}>
+                          {activeTerminated.map(u => {
+                            const eff = effDaysInCycle(u.terminated_at);
+                            return (
+                              <tr key={u.uid} style={{ borderTop:"1px solid #f3f4f6" }}>
+                                <td style={{ padding:"10px 12px", fontWeight:500 }}>{u.name}</td>
+                                <td style={{ textAlign:"center", padding:"10px 12px", color:"#6b7280" }}>{u.halftime ? "半職" : "全職"}</td>
+                                <td style={{ textAlign:"center", padding:"10px 12px" }}>
+                                  <input type="date" value={u.terminated_at ?? ""}
+                                    onChange={e => checkAndTerminate(u.uid, e.target.value)}
+                                    style={{ width:130, height:28, fontSize:12, textAlign:"center", border:"1px solid #e5e7eb", borderRadius:6, fontFamily:"inherit" }} />
+                                </td>
+                                <td style={{ textAlign:"center", padding:"10px 12px", fontWeight:500 }}>{eff} 天</td>
+                                <td style={{ textAlign:"center", padding:"10px 12px" }}>
+                                  <button onClick={() => submitTerminate(u.uid, null)}
+                                    style={{ background:"none", border:"none", color:"#dc2626", cursor:"pointer", fontSize:16, padding:"2px 4px" }}
+                                    title="取消離職(清除離職日)">✕</button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{ marginTop:12, textAlign:"center" }}>
+                      <button className="btn btn-outline" style={{ fontSize:13, padding:"6px 14px" }}
+                        onClick={() => setTermDialog({ uid: "", date: cycle.start_date || "" })}>
+                        ＋ 新增離職記錄
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -5553,6 +5786,60 @@ export default function AdminPage() {
           actions={[
             { label:"取消", onClick:() => setClearLogsConfirm(null) },
             { label:"確認清除", danger:true, onClick:() => clearLogs(clearLogsConfirm.hours, clearLogsConfirm.all) },
+          ]}
+        />
+      )}
+
+      {/* ── 新增離職記錄 Dialog */}
+      {termDialog && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}>
+          <div style={{ background:"#fff", borderRadius:14, padding:"20px 20px 16px", width:"100%", maxWidth:380, boxShadow:"0 20px 60px rgba(0,0,0,.25)" }}>
+            <div style={{ fontSize:15, fontWeight:700, marginBottom:14 }}>新增離職記錄</div>
+            <div style={{ display:"grid", gap:12, marginBottom:16 }}>
+              <div>
+                <div style={{ fontSize:12, color:"#6b7280", marginBottom:4 }}>護理師</div>
+                <select value={termDialog.uid}
+                  onChange={e => setTermDialog(d => d && ({ ...d, uid: e.target.value }))}
+                  style={{ width:"100%", height:34, fontSize:13, border:"1px solid #e5e7eb", borderRadius:6, padding:"0 8px", fontFamily:"inherit" }}>
+                  <option value="">-- 選擇 --</option>
+                  {nurseUsers
+                    .filter(u => !u.terminated_at)
+                    .map(u => (
+                      <option key={u.uid} value={u.uid}>{u.name}({u.halftime ? "半職" : "全職"})</option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:"#6b7280", marginBottom:4 }}>最後上班日</div>
+                <input type="date" value={termDialog.date}
+                  min={cycle.start_date} max={cycle.end_date}
+                  onChange={e => setTermDialog(d => d && ({ ...d, date: e.target.value }))}
+                  style={{ width:"100%", height:34, fontSize:13, border:"1px solid #e5e7eb", borderRadius:6, padding:"0 8px", fontFamily:"inherit" }} />
+              </div>
+            </div>
+            <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}>
+              <button onClick={() => setTermDialog(null)}
+                style={{ padding:"8px 16px", borderRadius:8, border:"none", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit", background:"#f3f4f6", color:"#374151" }}>取消</button>
+              <button onClick={() => termDialog.uid && termDialog.date && checkAndTerminate(termDialog.uid, termDialog.date)}
+                disabled={!termDialog.uid || !termDialog.date}
+                style={{ padding:"8px 16px", borderRadius:8, border:"none", fontSize:13, fontWeight:600, cursor: (termDialog.uid && termDialog.date) ? "pointer" : "not-allowed", fontFamily:"inherit", background: (termDialog.uid && termDialog.date) ? "#2563eb" : "#d1d5db", color:"#fff" }}>確定新增</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 離職 cascade 清空已確認班別確認 */}
+      {termConfirm && (
+        <Dialog
+          title={`${termConfirm.name} 離職將清空已確認班別`}
+          body={<>
+            離職日之後(<b>{termConfirm.date}</b> 之後)還有 <b style={{ color:"#dc2626" }}>{termConfirm.confirmedCount}</b> 筆已確認班別。
+            <br /><br />
+            確定要清空嗎?此動作無法復原(會寫入操作紀錄)。
+          </>}
+          actions={[
+            { label:"取消", onClick:() => setTermConfirm(null) },
+            { label:"確認清空並設定離職", danger:true, onClick:() => submitTerminate(termConfirm.uid, termConfirm.date) },
           ]}
         />
       )}

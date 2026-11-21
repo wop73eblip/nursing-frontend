@@ -1253,14 +1253,21 @@ export default function NursePage() {
                         const confirmed = entry?.confirmed ?? false;
                         const isSaving  = isMe && saving.has(d);
 
+                        // 離職日之後的格子:灰底「─」,不可編輯
+                        const termAt = (n as any).terminated_at as string | null | undefined;
+                        const isTerm = !!termAt && d > termAt;
+
                         // 屬性不符（只對自己判斷）
                         const mismatch  = isMe ? !!attrMismatchMsg(shift ?? "", myAttr, allOffShifts) : false;
                         const isDay1Locked = lockFirstDay && cycleRange && d === cycleRange.start;
                         // 管理員填入：updated_by 不是本人
                         const isAdminFilled = !!shift && !!entry?.updated_by && entry.updated_by !== n.uid;
 
-                        const { cls, style } = cellStyleFor(shift, confirmed, isSaving, mismatch, allOffShifts, isAdminFilled);
-                        const finalCls = `${cls}${!isMe ? " readonly" : ""}`;
+                        const { cls, style: baseStyle } = cellStyleFor(shift, confirmed, isSaving, mismatch, allOffShifts, isAdminFilled);
+                        const style = isTerm
+                          ? { background: "#f3f4f6", border: "1.5px solid transparent", color: "#d1d5db", cursor: "not-allowed", fontWeight: 400 }
+                          : baseStyle;
+                        const finalCls = `${cls}${!isMe ? " readonly" : ""}${isTerm ? " is-term" : ""}`;
 
                         const title = !isMe ? undefined
                           : isDay1Locked ? "第一天已鎖定，無法修改"
@@ -1276,13 +1283,15 @@ export default function NursePage() {
                         const ctrlShiftCls = (isCtrlSel ? " is-ctrl-sel" : "") + (isShiftSel ? " is-shift-sel" : "");
 
                         return (
-                          <td key={d} className={`td-shift${_isWe ? " we" : ""}`}>
+                          <td key={d} className={`td-shift${_isWe ? " we" : ""}`}
+                            style={isTerm ? { background: "#f3f4f6" } : undefined}
+                            title={isTerm ? `${n.name} 已於 ${termAt} 離職` : undefined}>
                             <span
                               className={finalCls + swipeCls + ctrlShiftCls}
-                              style={isMe && !isSuperAdmin && !isDay1Locked ? { ...style, touchAction: "pan-y" } : style}
-                              data-date={isMe && !isDay1Locked ? d : undefined}
-                              data-ni={isMe && !isDay1Locked ? String(ni) : undefined}
-                              onClick={isMe && !isSuperAdmin && !isDay1Locked ? (e) => {
+                              style={isMe && !isSuperAdmin && !isDay1Locked && !isTerm ? { ...style, touchAction: "pan-y" } : style}
+                              data-date={isMe && !isDay1Locked && !isTerm ? d : undefined}
+                              data-ni={isMe && !isDay1Locked && !isTerm ? String(ni) : undefined}
+                              onClick={isMe && !isSuperAdmin && !isDay1Locked && !isTerm ? (e) => {
                                 if (e.ctrlKey || e.metaKey) {
                                   e.preventDefault();
                                   setCtrlSelected(prev => {

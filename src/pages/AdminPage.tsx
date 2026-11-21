@@ -4572,8 +4572,21 @@ export default function AdminPage() {
                     // 新人不佔臨床人力名額（H15）；人力試算只算非新人
                     const clinicalNurses = schedulableNurses.filter(u => !u.is_trainee);
                     const traineeCount = schedulableNurses.filter(u => u.is_trainee).length;
-                    const fullNurses  = clinicalNurses.filter(u => !u.halftime).length;
-                    const halfNurses  = clinicalNurses.filter(u =>  u.halftime).length;
+                    // 離職者:從全職/半職扣除,獨立計算
+                    const dActiveTerminated = clinicalNurses.filter(u => effDaysInCycle(u.terminated_at) > 0);
+                    const _termUids = new Set(dActiveTerminated.map(u => u.uid));
+                    const nonTermClin = clinicalNurses.filter(u => !_termUids.has(u.uid));
+                    const fullNurses  = nonTermClin.filter(u => !u.halftime).length;
+                    const halfNurses  = nonTermClin.filter(u =>  u.halftime).length;
+                    // 離職者範圍 min/max
+                    let termMin = 0, termMax = 0;
+                    const termRows = dActiveTerminated.map(u => {
+                      const eff = effDaysInCycle(u.terminated_at);
+                      const lk = termLookup(eff);
+                      termMin += lk.workMin;
+                      termMax += lk.workMax;
+                      return { u, eff, lk };
+                    });
                     // 非臨床/請假類已填班別統計：D/E/N/OFF/半 以外全部計入（未來新增班別自動涵蓋）
                     // 排除新人（與整段人力試算一致，新人不計入臨床人力名額）
                     const _baseShifts = ["D", "E", "N", "OFF", "半"];
@@ -4594,20 +4607,27 @@ export default function AdminPage() {
                       return acc + (ov ? ov.d + ov.e + ov.n : defaultDaily);
                     }, 0);
                     const specialCount  = dCycleDays.filter(d => !!sdMap[d]).length;
-                    // 各護理師可提供的上班天數
-                    const totalAvailable =
-                      fullNurses * (n - dFullOff) +
-                      halfNurses * dPartWork;
-                    // 多餘人力
-                    const surplus = totalAvailable - totalRequired;
+                    // 各護理師可提供的上班天數(含離職者範圍)
+                    const baseAvail = fullNurses * (n - dFullOff) + halfNurses * dPartWork;
+                    const totalAvailableMin = baseAvail + termMin;
+                    const totalAvailableMax = baseAvail + termMax;
+                    // 多餘人力(範圍)
+                    const surplusMin = totalAvailableMin - totalRequired;
+                    const surplusMax = totalAvailableMax - totalRequired;
+                    const surplus = surplusMin;   // 顏色判斷:用最少(保守)
                     const color =
                       surplus < 0  ? { bg:"#fef2f2", border:"#fecaca", text:"#dc2626", badge:"#ef4444" } :
                       surplus === 0 ? { bg:"#f0fdf4", border:"#86efac", text:"#15803d", badge:"#22c55e" } :
                                      { bg:"#fffbeb", border:"#fde68a", text:"#92400e", badge:"#f59e0b" };
                     return (
                       <div style={{ background:color.bg, border:`1px solid ${color.border}`, borderRadius:10, padding:"14px 16px", fontSize:13 }}>
-                        <div style={{ fontWeight:700, color:color.text, marginBottom:10, fontSize:14 }}>
+                        <div style={{ fontWeight:700, color:color.text, marginBottom:10, fontSize:14, display:"flex", alignItems:"center", gap:8 }}>
                           人力試算
+                          {dActiveTerminated.length > 0 && (
+                            <span style={{ fontSize:11, color:"#92400e", background:"#fef3c7", padding:"2px 8px", borderRadius:10, fontWeight:600 }}>
+                              含 {dActiveTerminated.length} 位離職
+                            </span>
+                          )}
                         </div>
                         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 20px", fontSize:12, color:"#374151", marginBottom:10 }}>
                           <div>週期天數：<b>{n} 天</b></div>
@@ -4619,11 +4639,23 @@ export default function AdminPage() {
                               另有 <b>{traineeCount}</b> 位新人參與排班（照規則排、跟隨導師）但不計入臨床人力
                             </div>
                           )}
-                          <div>可提供總人力：<b>{totalAvailable}</b></div>
+                          <div>可提供總人力：<b>{totalAvailableMin === totalAvailableMax ? totalAvailableMin : `${totalAvailableMin}~${totalAvailableMax}`}</b></div>
                           <div>需求總人力：<b>{totalRequired}</b>
                             {specialCount > 0 && <span style={{ color:"#6b7280", fontSize:11 }}>（含 {specialCount} 個特殊日）</span>}
                           </div>
                         </div>
+                        {/* 離職者細節 */}
+                        {termRows.length > 0 && (
+                          <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:6, padding:"8px 10px", marginBottom:8, fontSize:12, color:"#1e3a8a" }}>
+                            <div style={{ fontWeight:700, color:"#1e40af", marginBottom:4 }}>🚪 離職者試算</div>
+                            {termRows.map(({ u, eff, lk }) => (
+                              <div key={u.uid} style={{ paddingLeft:8 }}>
+                                <b>{u.name}</b> {u.terminated_at} 離職(上班週期 {eff} 天)→ 預估可提供
+                                <b style={{ marginLeft:4 }}>{lk.workMin === lk.workMax ? `${lk.workMin}` : `${lk.workMin}~${lk.workMax}`} 天</b>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         {/* 非臨床/請假類已填班別統計（僅顯示，不影響多餘人力計算） */}
                         <div style={{ background:"rgba(0,0,0,0.04)", borderRadius:6, padding:"6px 10px", marginBottom:8, fontSize:12, color:"#374151" }}>
                           非臨床／請假類已填班別（D／E／N／OFF／半 以外，如 會／公／書／V／病／延休／調移…）：<b>{specialShiftCount} 格</b>
@@ -4641,13 +4673,15 @@ export default function AdminPage() {
                         )}
                         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                           <div style={{ fontSize:13, color:color.text, fontWeight:600 }}>
-                            多餘人力 ＝ {totalAvailable} － {totalRequired} ＝
+                            多餘人力 ＝ {totalAvailableMin === totalAvailableMax ? totalAvailableMin : `${totalAvailableMin}~${totalAvailableMax}`} － {totalRequired} ＝
                           </div>
                           <div style={{
                             background: color.badge, color:"#fff",
                             borderRadius:6, padding:"2px 12px", fontSize:16, fontWeight:800,
                           }}>
-                            {surplus >= 0 ? `+${surplus}` : surplus}
+                            {surplusMin === surplusMax
+                              ? (surplusMin >= 0 ? `+${surplusMin}` : surplusMin)
+                              : `${surplusMin >= 0 ? "+" : ""}${surplusMin}~${surplusMax >= 0 ? "+" : ""}${surplusMax}`}
                           </div>
                         </div>
                         {surplus < 0 && (

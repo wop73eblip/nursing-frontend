@@ -3371,8 +3371,19 @@ export default function AdminPage() {
                           checked={Number(penaltyForm["SLACK_SPREAD_HARD_CAP"] ?? 0) > 0}
                           onChange={e => setPenaltyForm(p => ({...p, SLACK_SPREAD_HARD_CAP: e.target.checked ? 1 : 0}))} />
                         <div>
-                          <span style={{ fontSize:13 }}>應休縮減公平硬性(所有人 slack 差 ≤ 1 天)</span><br />
-                          <span style={{ fontSize:12, color:"#6b7280" }}>硬規則:強制大家的應休縮減天數最多差 1 天(如半職少 2 天 → 全職也要各分擔 1 天)。人力充足時能確保「大家平均分攤」;人力吃緊時可能 INFEASIBLE,此時取消勾選讓 solver 集中縮減某幾人。default 關</span>
+                          <span style={{ fontSize:13 }}>人力不足時平均少放(所有人 slack 差 ≤ 1 天,硬性)</span><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>硬規則:當人力不足需縮減應休時,強制大家縮減天數最多差 1(如半職少 2 → 全職也各分擔 1)。能確保「少放的負擔平均分攤」;人力吃緊過頭可能 INFEASIBLE,此時取消勾選讓 solver 集中縮減某幾人。default 關</span>
+                        </div>
+                      </label>
+
+                      {/* over 公平硬約束:鏡像 slack 版,排除多餘 OFF 名單人 */}
+                      <label className="fcheck">
+                        <input type="checkbox"
+                          checked={Number(penaltyForm["OVER_SPREAD_HARD_CAP"] ?? 0) > 0}
+                          onChange={e => setPenaltyForm(p => ({...p, OVER_SPREAD_HARD_CAP: e.target.checked ? 1 : 0}))} />
+                        <div>
+                          <span style={{ fontSize:13 }}>人力過剩時平均多放(所有人 over 差 ≤ 1 天,硬性;多餘 OFF 名單除外)</span><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>硬規則:當人力過剩有多餘 OFF 時,強制大家超休天數最多差 1(避免一人獨拿多 OFF、其他人剛好應休)。「🎁 多餘 OFF 分配」名單內的人不受此規則限制,仍可集中多拿。離職者排除。default 關</span>
                         </div>
                       </label>
 

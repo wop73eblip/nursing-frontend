@@ -1676,18 +1676,23 @@ export default function AdminPage() {
           }
         }
       }
-      // 反向班(E→D、N→E、N→D 需隔 1-2 天 OFF)
+      // 反向班(E→D、N→E、N→D 需隔 1-2 天 OFF;行政班公/會/書記 當 D)
+      // 顯示時保留原班 → 看得出是「E→公」還是「E→D」觸發
+      const dispPair = (raw: string, norm: string) => raw === norm ? raw : `${raw}(當 ${norm})`;
       for (let i = 0; i < effCycDays.length - 1; i++) {
-        const s1 = sch[effCycDays[i]]; const s2 = sch[effCycDays[i+1]];
-        if (!s1 || !s2) continue;
-        if (s1 === "E" && s2 === "D") critical.push(`【反向班 E→D】${u.name} ${effCycDays[i]}→${effCycDays[i+1]}(需隔 1 天 OFF)`);
-        if (s1 === "N" && s2 === "E") critical.push(`【反向班 N→E】${u.name} ${effCycDays[i]}→${effCycDays[i+1]}(需隔 1 天 OFF)`);
-        if (s1 === "N" && s2 === "D") critical.push(`【反向班 N→D】${u.name} ${effCycDays[i]}→${effCycDays[i+1]}(需隔 2 天 OFF)`);
+        const r1 = sch[effCycDays[i]]; const r2 = sch[effCycDays[i+1]];
+        if (!r1 || !r2) continue;
+        const s1 = normalizeShift(r1); const s2 = normalizeShift(r2);
+        if (s1 === "E" && s2 === "D") critical.push(`【反向班 E→D】${u.name} ${effCycDays[i]} ${dispPair(r1,s1)}→${effCycDays[i+1]} ${dispPair(r2,s2)}(需隔 1 天 OFF)`);
+        if (s1 === "N" && s2 === "E") critical.push(`【反向班 N→E】${u.name} ${effCycDays[i]} ${dispPair(r1,s1)}→${effCycDays[i+1]} ${dispPair(r2,s2)}(需隔 1 天 OFF)`);
+        if (s1 === "N" && s2 === "D") critical.push(`【反向班 N→D】${u.name} ${effCycDays[i]} ${dispPair(r1,s1)}→${effCycDays[i+1]} ${dispPair(r2,s2)}(需隔 2 天 OFF)`);
       }
       for (let i = 0; i < effCycDays.length - 2; i++) {
-        const s1 = sch[effCycDays[i]]; const s3 = sch[effCycDays[i+2]];
+        const r1 = sch[effCycDays[i]]; const r3 = sch[effCycDays[i+2]];
+        if (!r1 || !r3) continue;
+        const s1 = normalizeShift(r1); const s3 = normalizeShift(r3);
         if (s1 === "N" && s3 === "D") {
-          warning.push(`【反向班 N→D(隔 1 天)】${u.name} ${effCycDays[i]}→${effCycDays[i+2]}(需隔 2 天)`);
+          warning.push(`【反向班 N→D(隔 1 天)】${u.name} ${effCycDays[i]} ${dispPair(r1,s1)}→${effCycDays[i+2]} ${dispPair(r3,s3)}(需隔 2 天)`);
         }
       }
       // 屬性衝突(行政班公/會/書記 正規化成 D 比對,因 solver 當 D 處理)

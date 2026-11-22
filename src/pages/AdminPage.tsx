@@ -1631,6 +1631,9 @@ export default function AdminPage() {
     }
     const workCodes = new Set(["D","E","N"]);
     const restCodes = new Set(["OFF","半"]);
+    // 行政班(會/公/書記)在 solver 當 D 處理,健檢也要一致 → 正規化成 D 再比對
+    const adminAsD = new Set(["會","公","書記"]);
+    const normalizeShift = (s: string) => adminAsD.has(s) ? "D" : s;
     const attrAllowed: Record<string, Set<string>> = {
       "固定D": new Set(["D"]), "固定E": new Set(["E"]), "固定N": new Set(["N"]),
       "輪班DE": new Set(["D","E"]), "輪班EN": new Set(["E","N"]), "輪班DN": new Set(["D","N"]),
@@ -1687,29 +1690,32 @@ export default function AdminPage() {
           warning.push(`【反向班 N→D(隔 1 天)】${u.name} ${effCycDays[i]}→${effCycDays[i+2]}(需隔 2 天)`);
         }
       }
-      // 屬性衝突
+      // 屬性衝突(行政班公/會/書記 正規化成 D 比對,因 solver 當 D 處理)
       const allowed = attrAllowed[u.attr];
       if (allowed) {
         for (const d of effCycDays) {
-          const s = sch[d];
-          if (!s) continue;
+          const sRaw = sch[d];
+          if (!sRaw) continue;
+          const s = normalizeShift(sRaw);
           if (workCodes.has(s) && !allowed.has(s)) {
             const isConf = confSet.has(`${u.uid}|${d}`);
-            warning.push(`【屬性衝突】${u.name}(${u.attr})${d} ${isConf ? "已確認" : "預填"} ${s} 班(系統會由例外機制接受,但可能擠壓其他規則)`);
+            const disp = sRaw === s ? `${s} 班` : `${sRaw}(當 ${s} 班)`;
+            warning.push(`【屬性衝突】${u.name}(${u.attr})${d} ${isConf ? "已確認" : "預填"} ${disp}(系統會由例外機制接受,但可能擠壓其他規則)`);
           }
         }
       }
-      // 每週檢查(以 cycle 開始為基準 7 天一組)
+      // 每週檢查(以 cycle 開始為基準 7 天一組;行政班正規化成 D)
       for (let wi = 0; wi < effCycDays.length; wi += 7) {
         const week = effCycDays.slice(wi, Math.min(wi + 7, effCycDays.length));
         if (week.length < 7) continue;   // 不完整週略過
         const kinds = new Set<string>();
         let offCount = 0;
         for (const d of week) {
-          const s = sch[d];
-          if (!s) continue;
+          const sRaw = sch[d];
+          if (!sRaw) continue;
+          const s = normalizeShift(sRaw);
           if (workCodes.has(s)) kinds.add(s);
-          if (restCodes.has(s)) offCount++;
+          if (restCodes.has(sRaw)) offCount++;
         }
         if (kinds.size > 2) {
           critical.push(`【H4 每週 ≤ 2 種班別】${u.name} ${week[0]}~${week[week.length-1]}:${[...kinds].join("/")}(${kinds.size} 種)`);

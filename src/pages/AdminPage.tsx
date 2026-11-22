@@ -1630,7 +1630,6 @@ export default function AdminPage() {
     }
     const workCodes = new Set(["D","E","N"]);
     const restCodes = new Set(["OFF","半"]);
-    const leaveAdjust = new Set(offShifts.filter(s => s.code !== "OFF" && s.code !== "半").map(s => s.code));
     const attrAllowed: Record<string, Set<string>> = {
       "固定D": new Set(["D"]), "固定E": new Set(["E"]), "固定N": new Set(["N"]),
       "輪班DE": new Set(["D","E"]), "輪班EN": new Set(["E","N"]), "輪班DN": new Set(["D","N"]),
@@ -1650,23 +1649,27 @@ export default function AdminPage() {
       for (const d of effCycDays) {
         if (sch[d]) totalFilled++; else totalEmpty++;
       }
-      // 連續上班
+      // 連續上班類+LA(D/E/N/行政 + V/員/喪等 LA 全算,只有 OFF/半 斷開)
       let streak = 0;
       let streakStart: string | null = null;
+      let streakReported = false;
       for (const d of effCycDays) {
         const s = sch[d] || "";
-        if (workCodes.has(s) || leaveAdjust.has(s) === false && s !== "" && !restCodes.has(s)) {
-          // workCodes OR admin 類(非 rest 非 LA 非 workCodes 的 D/E/N 替代)
-          if (workCodes.has(s) || (!restCodes.has(s) && !leaveAdjust.has(s) && s)) {
-            if (streak === 0) streakStart = d;
-            streak++;
-            if (streak > max_consec) {
-              critical.push(`【連續上班超過 ${max_consec} 天】${u.name} ${streakStart}~${d}(連 ${streak} 天)`);
-              break;
-            }
-          }
+        const isRestLike = restCodes.has(s);   // OFF / 半 才斷連續
+        if (!s) {
+          // 空白格:不計入連續(solver 有彈性),但也不斷開(保守)
+          continue;
+        }
+        if (isRestLike) {
+          streak = 0; streakStart = null; streakReported = false;
         } else {
-          streak = 0; streakStart = null;
+          // 工作類 or LA 都算
+          if (streak === 0) streakStart = d;
+          streak++;
+          if (streak > max_consec && !streakReported) {
+            critical.push(`【連續上班類+LA 超過 ${max_consec} 天】${u.name} ${streakStart}~${d}(連 ${streak} 天工作/LA,需插 OFF/半)`);
+            streakReported = true;
+          }
         }
       }
       // 反向班(E→D、N→E、N→D 需隔 1-2 天 OFF)
@@ -3742,7 +3745,7 @@ export default function AdminPage() {
             { no:"H5",  title:"每週至少 1 天休", desc:"底線，恆常生效（OFF 或半）" },
             { no:"H7",  title:"每班每日至少 1 位 leader", desc:"行政班、新人的 leader 不算" },
             { no:"H8",  title:"每班每日至少 2 位 leader/second", desc:"受當班需求人數上限 min(2, 需求)；行政班、新人不算" },
-            { no:"H9",  title:"連續上班天數不超過設定值", desc:"預設 5 天，跨週累計（含上週歷史）" },
+            { no:"H9",  title:"連續上班類+LA 天數不超過設定值", desc:"預設 5 天,跨週累計(含上週歷史)。計入:D/E/N/行政班(書/會/公) + LA(V/員/喪/延休/補休/調移);只有 OFF/半 才斷開連續。例:V V V V V OFF 可;V V V V V V 違規" },
             { no:"H10", title:"輪班屬性限制 + 固定班偏離", desc:"輪班DE 只排 D/E 等；勾「允許固定班偏離」＝最多 2 格，未勾＝0 格。公平優先版一律 0 格" },
             { no:"H11", title:"放假/調整類最高優先鎖定", desc:H11_DESC },
             { no:"H12", title:"半職視同應休", desc:"計入應休天數" },

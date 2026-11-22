@@ -4751,6 +4751,24 @@ export default function AdminPage() {
                             ))}
                           </div>
                         )}
+                        {/* 多餘 OFF 分配名單(確認本期已填入誰) */}
+                        {extraOffThisCycle.length > 0 && (
+                          <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:6, padding:"6px 10px", marginBottom:8, fontSize:11, color:"#1e3a8a" }}>
+                            <b style={{ color:"#1e40af" }}>🎁 多餘 OFF 分配(本期):</b>
+                            {extraOffThisCycle.map(uid => {
+                              const u = nurseUsers.find(x => x.uid === uid);
+                              const label = u ? `${u.name || uid}${u.halftime ? "(半)" : ""}` : uid;
+                              return (
+                                <span key={uid} style={{ display:"inline-block", marginLeft:6, padding:"1px 8px", background:"#dbeafe", color:"#1e40af", borderRadius:10, fontWeight:600 }}>
+                                  {label}
+                                </span>
+                              );
+                            })}
+                            <span style={{ marginLeft:8, color:"#6b7280", fontWeight:500 }}>
+                              共 {extraOffThisCycle.length} 人,人力過剩時優先分配 OFF
+                            </span>
+                          </div>
+                        )}
                         {surplus < 0 && (
                           <div style={{ marginTop:8, fontSize:12, color:"#dc2626", fontWeight:600 }}>
                             ⚠ 人力不足 {Math.abs(surplus)} 格，CP-SAT 可能無法生成班表。建議增加護理師人數或減少每日需求。

@@ -458,6 +458,7 @@ export default function AdminPage() {
     daily_d: 3, daily_e: 3, daily_n: 3, // 各班每日人數
     special_dates: [] as { date: string; d: number; e: number; n: number }[], // 特殊日期覆蓋
     max_consecutive_work: 5,   // 連續上班天數上限（跨週累計）
+    include_la_in_consec: false, // 連續計算時把 LA(V/員/喪等)也算入(預設關;開啟 solver 會較慢)
     weekly_max_two_shifts: true, // 每週至多兩種班別
     lock_first_day: true,      // 第一天鎖定
     no_reverse_shift: true,    // 反向班禁止（硬規則）
@@ -3254,6 +3255,18 @@ export default function AdminPage() {
                         <input type="checkbox" checked={rulesForm.lock_first_day}
                           onChange={e => setRulesForm(p=>({...p,lock_first_day:e.target.checked}))} />
                         <span style={{ fontSize:13 }}>第一天鎖定（參考前期最後7天的班別延伸）</span>
+                      </label>
+                      <label className="fcheck">
+                        <input type="checkbox" checked={rulesForm.include_la_in_consec}
+                          onChange={e => setRulesForm(p=>({...p,include_la_in_consec:e.target.checked}))} />
+                        <div>
+                          <span style={{ fontSize:13 }}>連續計算時把 LA(V/員/喪等)也算入</span><br />
+                          <span style={{ fontSize:12, color:"#6b7280" }}>
+                            啟用後:連續「D/E/N/行政 + V/員/喪/延休/補休/調移」≤ 設定值,只有真 OFF/半 才斷開。
+                            例:V V V V V V V 違規;OFF V V V V V OFF 可。
+                            <b style={{ color:"#dc2626" }}>⚠ 會讓 solver 變慢較明顯,預填 LA 多時可能 timeout。</b>
+                          </span>
+                        </div>
                       </label>
                     </div>
                   </div>

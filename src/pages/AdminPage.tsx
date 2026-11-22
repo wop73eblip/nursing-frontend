@@ -1621,10 +1621,24 @@ export default function AdminPage() {
       cycDays.push(fmt(d));
     }
     const nurses = schedulableNurses.filter(u => !u.is_trainee);
+    const max_consec = rulesForm.max_consecutive_work ?? 5;
+    const one_in_seven = rulesForm.one_in_seven ?? true;
+    const weekly_max_off_total = rulesForm.weekly_max_off_total ?? 3;
+    // 歷史天數:為了跨週期檢查反向班(需 2 天)+ 連續上班(需 max_consec 天)
+    const histDaysNeeded = Math.max(max_consec, 2);
+    const histDays: string[] = [];
+    for (let i = histDaysNeeded; i >= 1; i--) {
+      const dh = new Date(d0); dh.setDate(dh.getDate() - i);
+      histDays.push(fmt(dh));
+    }
+    // 歷史+週期 的合併時間軸(反向班、連續上班用這個,屬性衝突/每週檢查仍只看週期內)
+    const cycSet = new Set(cycDays);
+    const histSet = new Set(histDays);
+    const extDays = [...histDays, ...cycDays];
     const schedByUid: Record<string, Record<string, string>> = {};
     const confSet = new Set<string>();   // "uid|date" for confirmed shifts
     for (const r of schedule) {
-      if (!cycDays.includes(r.date)) continue;
+      if (!cycSet.has(r.date) && !histSet.has(r.date)) continue;
       if (!r.shift) continue;
       (schedByUid[r.nurse_uid] ||= {})[r.date] = r.shift;
       if (r.confirmed) confSet.add(`${r.nurse_uid}|${r.date}`);
@@ -1639,9 +1653,6 @@ export default function AdminPage() {
       "輪班DE": new Set(["D","E"]), "輪班EN": new Set(["E","N"]), "輪班DN": new Set(["D","N"]),
       "輪班DEN": new Set(["D","E","N"]),
     };
-    const max_consec = rulesForm.max_consecutive_work ?? 5;
-    const one_in_seven = rulesForm.one_in_seven ?? true;
-    const weekly_max_off_total = rulesForm.weekly_max_off_total ?? 3;
     let totalEmpty = 0;
     let totalFilled = 0;
     for (const u of nurses) {
@@ -1654,45 +1665,55 @@ export default function AdminPage() {
         if (sch[d]) totalFilled++; else totalEmpty++;
       }
       // 連續上班類+LA(D/E/N/行政 + V/員/喪等 LA 全算,只有 OFF/半 斷開)
+      // 從歷史開始累計,但只在「當前日在週期內」時才報警(避免歷史內的過往狀況被標)
       let streak = 0;
       let streakStart: string | null = null;
       let streakReported = false;
-      for (const d of effCycDays) {
+      const extForStreak = [...histDays, ...effCycDays];
+      for (const d of extForStreak) {
         const s = sch[d] || "";
-        const isRestLike = restCodes.has(s);   // OFF / 半 才斷連續
         if (!s) {
           // 空白格:不計入連續(solver 有彈性),但也不斷開(保守)
           continue;
         }
-        if (isRestLike) {
+        if (restCodes.has(s)) {
           streak = 0; streakStart = null; streakReported = false;
         } else {
-          // 工作類 or LA 都算
           if (streak === 0) streakStart = d;
           streak++;
-          if (streak > max_consec && !streakReported) {
-            critical.push(`【連續上班類+LA 超過 ${max_consec} 天】${u.name} ${streakStart}~${d}(連 ${streak} 天工作/LA,需插 OFF/半)`);
+          // 只在當前日在週期內 + 超限 + 尚未報 時才 push(歷史內就滿 5 不干我們事)
+          if (cycSet.has(d) && streak > max_consec && !streakReported) {
+            const prefix = histSet.has(streakStart ?? "") ? "(含上週期)" : "";
+            critical.push(`【連續上班類+LA 超過 ${max_consec} 天】${u.name} ${streakStart}~${d}${prefix}(連 ${streak} 天工作/LA,需插 OFF/半)`);
             streakReported = true;
           }
         }
       }
-      // 反向班(E→D、N→E、N→D 需隔 1-2 天 OFF;行政班公/會/書記 當 D)
+      // 反向班(E→D、N→E、N→D 需隔 1-2 天 OFF;行政班公/會/書記 當 D;跨週期)
       // 顯示時保留原班 → 看得出是「E→公」還是「E→D」觸發
       const dispPair = (raw: string, norm: string) => raw === norm ? raw : `${raw}(當 ${norm})`;
-      for (let i = 0; i < effCycDays.length - 1; i++) {
-        const r1 = sch[effCycDays[i]]; const r2 = sch[effCycDays[i+1]];
+      // 以 extDays(歷史+週期)迭代,但只報「至少一端在週期內」的配對(歷史 vs 歷史 跳過)
+      const extEff = termAt ? extDays.filter(d => d <= termAt) : extDays;
+      for (let i = 0; i < extEff.length - 1; i++) {
+        const d1 = extEff[i]; const d2 = extEff[i+1];
+        if (!cycSet.has(d1) && !cycSet.has(d2)) continue;   // 兩端都是歷史,跳過
+        const r1 = sch[d1]; const r2 = sch[d2];
         if (!r1 || !r2) continue;
         const s1 = normalizeShift(r1); const s2 = normalizeShift(r2);
-        if (s1 === "E" && s2 === "D") critical.push(`【反向班 E→D】${u.name} ${effCycDays[i]} ${dispPair(r1,s1)}→${effCycDays[i+1]} ${dispPair(r2,s2)}(需隔 1 天 OFF)`);
-        if (s1 === "N" && s2 === "E") critical.push(`【反向班 N→E】${u.name} ${effCycDays[i]} ${dispPair(r1,s1)}→${effCycDays[i+1]} ${dispPair(r2,s2)}(需隔 1 天 OFF)`);
-        if (s1 === "N" && s2 === "D") critical.push(`【反向班 N→D】${u.name} ${effCycDays[i]} ${dispPair(r1,s1)}→${effCycDays[i+1]} ${dispPair(r2,s2)}(需隔 2 天 OFF)`);
+        const mark = histSet.has(d1) ? "(上週期)" : "";
+        if (s1 === "E" && s2 === "D") critical.push(`【反向班 E→D】${u.name} ${d1}${mark} ${dispPair(r1,s1)}→${d2} ${dispPair(r2,s2)}(需隔 1 天 OFF)`);
+        if (s1 === "N" && s2 === "E") critical.push(`【反向班 N→E】${u.name} ${d1}${mark} ${dispPair(r1,s1)}→${d2} ${dispPair(r2,s2)}(需隔 1 天 OFF)`);
+        if (s1 === "N" && s2 === "D") critical.push(`【反向班 N→D】${u.name} ${d1}${mark} ${dispPair(r1,s1)}→${d2} ${dispPair(r2,s2)}(需隔 2 天 OFF)`);
       }
-      for (let i = 0; i < effCycDays.length - 2; i++) {
-        const r1 = sch[effCycDays[i]]; const r3 = sch[effCycDays[i+2]];
+      for (let i = 0; i < extEff.length - 2; i++) {
+        const d1 = extEff[i]; const d3 = extEff[i+2];
+        if (!cycSet.has(d1) && !cycSet.has(d3)) continue;
+        const r1 = sch[d1]; const r3 = sch[d3];
         if (!r1 || !r3) continue;
         const s1 = normalizeShift(r1); const s3 = normalizeShift(r3);
         if (s1 === "N" && s3 === "D") {
-          warning.push(`【反向班 N→D(隔 1 天)】${u.name} ${effCycDays[i]} ${dispPair(r1,s1)}→${effCycDays[i+2]} ${dispPair(r3,s3)}(需隔 2 天)`);
+          const mark = histSet.has(d1) ? "(上週期)" : "";
+          warning.push(`【反向班 N→D(隔 1 天)】${u.name} ${d1}${mark} ${dispPair(r1,s1)}→${d3} ${dispPair(r3,s3)}(需隔 2 天)`);
         }
       }
       // 屬性衝突(行政班公/會/書記 正規化成 D 比對,因 solver 當 D 處理)

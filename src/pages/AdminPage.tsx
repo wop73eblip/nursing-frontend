@@ -465,7 +465,7 @@ export default function AdminPage() {
     prefer_smooth: true,       // 盡量順班（軟規則）
     // ── 休假規則（新增）
     restrict_first_weekend: true,  // 規則5：首個週末不同時休
-    weekly_max_off_auto: 2,        // 規則6：自動休每週上限
+    weekly_max_off_auto: 3,        // 規則6：自動休每週上限
     weekly_max_off_total: 3,       // 規則7：含指定休每週上限
     one_in_seven: true,            // 規則8：一例一休（每週≥2天休）
     allow_fixed_deviation: false,  // 固定班可偏離最多2格；未勾（預設）＝完全不可偏離

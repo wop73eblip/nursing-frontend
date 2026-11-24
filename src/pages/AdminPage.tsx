@@ -458,7 +458,7 @@ export default function AdminPage() {
     daily_d: 3, daily_e: 3, daily_n: 3, // 各班每日人數
     special_dates: [] as { date: string; d: number; e: number; n: number }[], // 特殊日期覆蓋
     max_consecutive_work: 5,   // 連續上班天數上限（跨週累計）
-    include_la_in_consec: false, // 連續計算時把 LA(V/員/喪等)也算入(預設關;開啟 solver 會較慢)
+    include_la_in_consec: true,  // 連續計算時把 LA(V/員/喪等)也算入(預設開)
     weekly_max_two_shifts: true, // 每週至多兩種班別
     lock_first_day: true,      // 第一天鎖定
     no_reverse_shift: true,    // 反向班禁止（硬規則）
@@ -484,8 +484,6 @@ export default function AdminPage() {
   // 個別護理師比例覆蓋
   type RatioOverride = { nurse_uid: string; ratio: Record<string, number> };
   const [ratioOverrides, setRatioOverrides] = useState<RatioOverride[]>([]);
-  // 個別護理師 attr 偏離配額
-  const [nurseDevOverrides, setNurseDevOverrides] = useState<Array<{nurse_uid: string; days: number}>>([]);
   // 已儲存快照（一鍵生成頁籤只顯示已寫入資料庫的值，避免誤以為已儲存）
   const [savedCycle, setSavedCycle] = useState<typeof cycle | null>(null);
   const [savedRules, setSavedRules] = useState<typeof rulesForm | null>(null);
@@ -1184,7 +1182,6 @@ export default function AdminPage() {
       if (r.ratio) setRatioForm(prev => ({ ...prev, ...r.ratio }));
       if (r.penalties) setPenaltyForm(r.penalties);
       if (r.ratio_overrides) setRatioOverrides(r.ratio_overrides);
-      if (r.nurse_deviation_overrides) setNurseDevOverrides(r.nurse_deviation_overrides);
       if (r.prev_cycle_counts) setPrevCycleCounts(r.prev_cycle_counts);
       if (r.shift_restrictions && Array.isArray(r.shift_restrictions)) setShiftRestrictions(r.shift_restrictions);
       if (r.forbidden_pairs && Array.isArray(r.forbidden_pairs)) setForbiddenPairs(r.forbidden_pairs);
@@ -1574,7 +1571,7 @@ export default function AdminPage() {
   }
   async function saveSchedulingRules() {
     try {
-      await api.post("/rules", { rules: { scheduling: rulesForm, ratio: ratioForm, ratio_overrides: ratioOverrides, penalties: penaltyForm, nurse_deviation_overrides: nurseDevOverrides } });
+      await api.post("/rules", { rules: { scheduling: rulesForm, ratio: ratioForm, ratio_overrides: ratioOverrides, penalties: penaltyForm } });
       setSavedRules(rulesForm);   // 儲存成功後才更新一鍵生成頁籤顯示的快照
       showToast("✓ 排班規則已儲存");
     } catch (err: any) {
@@ -2029,10 +2026,6 @@ export default function AdminPage() {
         input[type="time"].finput::-webkit-inner-spin-button { display: none; -webkit-appearance: none; }
         /* 佔位提示（空值時）文字對齊左邊 */
         input[type="date"].finput, input[type="time"].finput { text-align: left; }
-        /* 個別護理師偏離次數:手機縮小數字輸入 */
-        @media (max-width: 768px) {
-          .dev-days-input { width: 32px !important; padding: 3px 2px !important; font-size: 11px !important; }
-        }
         /* 填表截止日時間欄:桌面 140px(留時鐘 icon 空間)、手機 100px(避免佔太寬) */
         .deadline-time-input { width: 140px !important; flex: 0 0 140px !important; }
         @media (max-width: 768px) {
@@ -3339,56 +3332,6 @@ export default function AdminPage() {
                           <span style={{ fontSize:12, color:"#6b7280" }}>勾選：固定班（固定D/E/N）在人力缺口時最多可偏離 2 格到其他班別。取消勾選：固定班完全不可偏離、只排該班（湊不出時會生成失敗）。註：公平優先版一律不可偏離。</span>
                         </div>
                       </label>
-
-                      {/* 個別護理師偏離次數配額 */}
-                      <div style={{ padding:"8px 10px", background:"#fafafa", border:"1px dashed #e5e7eb", borderRadius:8 }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
-                          <span style={{ fontSize:13, fontWeight:600, color:"#374151" }}>個別護理師偏離次數</span>
-                          <span style={{ fontSize:11, color:"#9ca3af" }}>覆蓋上面預設值,固定/輪班 attr 皆生效</span>
-                          <button type="button"
-                            onClick={() => {
-                              const taken = new Set(nurseDevOverrides.map(o => o.nurse_uid));
-                              const first = nurseUsers.find(u => !taken.has(u.uid));
-                              if (!first) return;
-                              setNurseDevOverrides(prev => [...prev, { nurse_uid: first.uid, days: 1 }]);
-                            }}
-                            disabled={nurseUsers.filter(u => !nurseDevOverrides.some(o => o.nurse_uid === u.uid)).length === 0}
-                            style={{ padding:"3px 10px", border:"1px solid #16a34a", borderRadius:5, background:"#f0fdf4", color:"#166534", cursor:"pointer", fontSize:12, fontWeight:600, marginLeft:"auto" }}>
-                            + 新增
-                          </button>
-                        </div>
-                        {nurseDevOverrides.length === 0 ? (
-                          <div style={{ fontSize:11, color:"#9ca3af", padding:"4px 0" }}>尚無個別設定,套用「允許固定班偏離」全域設定</div>
-                        ) : nurseDevOverrides.map((o, i) => {
-                          const usedUids = new Set(nurseDevOverrides.filter((_, j) => j !== i).map(x => x.nurse_uid));
-                          const options = nurseUsers.filter(u => !usedUids.has(u.uid));
-                          return (
-                            <div key={i} style={{ display:"flex", alignItems:"center", gap:5, marginBottom:5, flexWrap:"nowrap" }}>
-                              <select value={o.nurse_uid}
-                                onChange={e => setNurseDevOverrides(prev => prev.map((x, j) => j === i ? { ...x, nurse_uid: e.target.value } : x))}
-                                style={{ padding:"3px 6px", border:"1px solid #d1d5db", borderRadius:5, fontSize:12, flex:"0 1 auto", minWidth:0, maxWidth:140 }}>
-                                {options.map(u => (
-                                  <option key={u.uid} value={u.uid}>
-                                    {u.name}({u.attr}){u.halftime ? "·半" : ""}
-                                  </option>
-                                ))}
-                              </select>
-                              <span style={{ fontSize:12, color:"#6b7280", flexShrink:0 }}>偏離</span>
-                              <input type="number" min={0} max={31} value={o.days}
-                                onChange={e => setNurseDevOverrides(prev => prev.map((x, j) => j === i ? { ...x, days: Math.max(0, parseInt(e.target.value || "0", 10) || 0) } : x))}
-                                onFocus={e => e.currentTarget.select()}
-                                className="dev-days-input"
-                                style={{ width:42, padding:"3px 4px", border:"1px solid #d1d5db", borderRadius:5, fontSize:12, textAlign:"center", flexShrink:0 }} />
-                              <span style={{ fontSize:12, color:"#6b7280", flexShrink:0 }}>天</span>
-                              <button type="button"
-                                onClick={() => setNurseDevOverrides(prev => prev.filter((_, j) => j !== i))}
-                                style={{ padding:"1px 6px", border:"1px solid #dc2626", borderRadius:5, background:"#fee2e2", color:"#991b1b", cursor:"pointer", fontSize:12, fontWeight:600, flexShrink:0 }}>
-                                ×
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
 
                       {/* H18 應休優先 */}
                       <label className="fcheck">

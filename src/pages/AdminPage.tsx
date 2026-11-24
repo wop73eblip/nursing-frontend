@@ -3391,23 +3391,23 @@ export default function AdminPage() {
                       { key:"DIRECT_SWITCH_PENALTY",  label:"S1 沒休就換",       def:500,  min:0, max:20000, cat:"S1 順班",     tip:"S1:沒先排 OFF 就直接切換每次罰(必要/多餘都加)" },
                       { key:"REVERSE_SWITCH_PENALTY", label:"S1 反向班換班",     def:500,  min:0, max:20000, cat:"S1 順班",     tip:"S1 軟罰:E→D、N→E、N→D 不論隔幾天 OFF/半/V/員/喪都額外罰;H3 硬規則已擋未隔 OFF,此為合法反向的軟罰" },
                       { key:"DIST_PENALTY",           label:"S4 班次比例偏差",   def:900,  min:0, max:20000, cat:"S4 比例/公平", tip:"S4:各護理師 D/E/N 天數偏離設定比例每單位罰" },
-                      { key:"RATIO_CAP_DAYS",         label:"H13 單週期比例硬上限(天)", def:2,   min:1, max:10,     cat:"H13/H14 比例硬規則", tip:"H13 硬規則:輪班屬性(DE/DN/EN/DEN)的人,班種計數偏離公式 |Da·Rb − Db·Ra| ≤ 此值 × (Ra+Rb)。default 2(較嚴、10:10 極限 8:12);設 3-4 較寬鬆,人力吃緊時較易排出;設 >5 幾乎不限制" },
-                      { key:"RATIO_CAP_DAYS_DUAL",    label:"H14 雙週期加總比例目標(天)", def:0,   min:0, max:10,     cat:"H13/H14 比例硬規則", tip:"H14:雙週期(上月+本月 committed)加總比例「軟」約束;0=關閉;設 3=兩月加起來比例偏差目標 ≤ 3 天。超出以 H14_SOFT_PENALTY 罰(不 INFEASIBLE):跨 attr(上月出現本月 attr 不允許的班種)會自動 fallback 不套 H14。與 H13 單期硬上限並存" },
+                      { key:"RATIO_CAP_DAYS",         label:"H13 單週期比例硬上限(天)", def:5,   min:1, max:10,     cat:"H13/H14 比例硬規則", tip:"H13 硬規則:輪班屬性(DE/DN/EN/DEN)的人,班種計數偏離公式 |Da·Rb − Db·Ra| ≤ 此值 × (Ra+Rb)。default 5(寬);設 2-3 較嚴、設 >5 幾乎不限制" },
+                      { key:"RATIO_CAP_DAYS_DUAL",    label:"H14 雙週期加總比例目標(天)", def:3,   min:0, max:10,     cat:"H13/H14 比例硬規則", tip:"H14:雙週期(上月+本月 committed)加總比例「軟」約束;0=關閉;default 3=兩月加起來比例偏差目標 ≤ 3 天。超出以 H14_SOFT_PENALTY 罰(不 INFEASIBLE):跨 attr(上月出現本月 attr 不允許的班種)會自動 fallback 不套 H14。與 H13 單期硬上限並存" },
                       { key:"H14_SOFT_PENALTY",       label:"H14 超額每天罰",   def:1500,  min:0, max:20000, cat:"H13/H14 比例硬規則", tip:"H14 雙期目標超出時,每 1 單位差距的罰值。default 1500(比 DIST_PENALTY 900 高,solver 會優先滿足 H14);設 0=完全不罰(等同關閉 H14)" },
-                      { key:"SLACK_MAX_PER_NURSE",    label:"R2 每人少休上限(天)", def:2,     min:0, max:14,    cat:"R2 休假配額", tip:"R2:每位護理師可縮減應休天數的上限。default 2(每人最多少 2 天);人力嚴重不足時可拉高至 5-7 讓生成不失敗(即使代價是縮更多)。設 0=不可縮減(強制休滿,人力不足時 INFEASIBLE)。與「應休縮減公平硬性(L4)」搭配時,拉高此值可降低 INFEASIBLE 風險" },
+                      { key:"SLACK_MAX_PER_NURSE",    label:"R2 每人少休上限(天)", def:0,     min:0, max:14,    cat:"R2 休假配額", tip:"R2:每位護理師可縮減應休天數的上限。default 0(不可縮減,強制休滿;人力不足時會 INFEASIBLE);拉高至 2-7 允許少休以降低失敗率。與「應休縮減公平硬性(L4)」搭配時,拉高此值可降低 INFEASIBLE 風險" },
                       { key:"SEG_HARD_CAP_2",         label:"H20 段數上限(輪班2種)", def:5,   min:0, max:20,     cat:"H20 段數硬規則", tip:"H20 硬規則:輪班2種(DE/DN/EN)每人整週期「所有班種段數加總」上限;0=關閉。default 5(嚴),過緊會 INFEASIBLE 可調 6-8。半職、固定班不套用" },
                       { key:"SEG_HARD_CAP_3",         label:"H20 段數上限(輪班DEN)", def:6,   min:0, max:20,     cat:"H20 段數硬規則", tip:"H20 硬規則:輪班DEN 每人整週期「所有班種段數加總」上限;0=關閉。default 6,過緊會 INFEASIBLE 可調 7-10。半職、固定班不套用" },
                       { key:"SKILL_SPREAD_PENALTY",   label:"S5 應休縮減公平",   def:400,  min:0, max:20000, cat:"S5 休假公平", tip:"S5:各護理師縮減幅度差距罰(讓縮減平均分攤);配合 R2 應休配額" },
                       { key:"ISOLATED_WORK_PENALTY",  label:"S2 孤立上班日",     def:750,  min:0, max:20000, cat:"S2 孤立日",   tip:"S2:OFF-上班-OFF 只出來上一天罰;與 H18 每人硬上限並存" },
                       { key:"HT_ISOLATED_MULT",       label:"S2 半職孤立日倍率", def:2.5,  min:1, max:10,    step:0.1, cat:"S2 孤立日", tip:"S2:半職的孤立上班日 penalty × 倍率(半職工作天少易被排孤立日)" },
-                      { key:"ISOLATED_MAX_TOTAL",     label:"全院孤立日總數硬上限",def:-1,  min:-1, max:100,  cat:"H18 孤立日硬規則", tip:"全體護理師 OFF-上班-OFF 總數硬上限(與 H18 每人上限並存)。-1=不限制;0=完全禁止(任何人都不能有);N>0 就是 ≤ N 天" },
-                      { key:"ISO_MAX_PER_NURSE",      label:"H18 全職孤立日硬上限",def:1,   min:-1, max:10,   cat:"H18 孤立日硬規則", tip:"H18:每位全職整週期的孤立日硬上限。-1=不限制;0=完全禁止;N>0 就是 ≤ N;預設 1" },
-                      { key:"ISO_MAX_PER_NURSE_HT",   label:"H18 半職孤立日硬上限",def:2,   min:-1, max:10,   cat:"H18 孤立日硬規則", tip:"H18:每位半職整週期的孤立日硬上限。-1=不限制;0=完全禁止;N>0 就是 ≤ N;預設 2(半職密度稀,buffer 多 1)" },
+                      { key:"ISOLATED_MAX_TOTAL",     label:"全院孤立日總數硬上限",def:0,   min:-1, max:100,  cat:"H18 孤立日硬規則", tip:"全體護理師 OFF-上班-OFF 總數硬上限(與 H18 每人上限並存)。-1=不限制;0=完全禁止(任何人都不能有);N>0 就是 ≤ N 天" },
+                      { key:"ISO_MAX_PER_NURSE",      label:"H18 全職孤立日硬上限",def:2,   min:-1, max:10,   cat:"H18 孤立日硬規則", tip:"H18:每位全職整週期的孤立日硬上限。-1=不限制;0=完全禁止;N>0 就是 ≤ N;預設 2" },
+                      { key:"ISO_MAX_PER_NURSE_HT",   label:"H18 半職孤立日硬上限",def:1,   min:-1, max:10,   cat:"H18 孤立日硬規則", tip:"H18:每位半職整週期的孤立日硬上限。-1=不限制;0=完全禁止;N>0 就是 ≤ N;預設 1" },
                       { key:"WEEKLY_OFF_OVER_PENALTY",label:"S7 週OFF凸性",      def:500,  min:0, max:20000, cat:"S7 週 OFF",   tip:"S7:全職每週 OFF 超過 2 天罰(凸性 3 層)" },
                       { key:"FIX_PENALTY",            label:"S3 固定班偏離",     def:500,  min:0, max:20000, cat:"S3 固定班",   tip:"S3:固定班偏離其班種每格罰(與 H10 硬上限 ≤2 格並存)" },
                       { key:"ULTRA_SHORT_BLOCK_PENALTY", label:"S8 超短塊(1天)罰",  def:3000, min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S8:同種班連續只 1 天(前後都不是同班)每塊罰;比 2 天塊更痛;全職套用" },
-                      { key:"SHORT_BLOCK_PENALTY",    label:"S8 短塊(2天)罰",     def:500,  min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S8:同種班連續 2 天每塊罰;比 1 天塊輕;全職套用" },
-                      { key:"MID_BLOCK_REWARD",       label:"S9 中塊(3-4天)獎勵", def:500,  min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S9:同種班連續 3-4 天每塊獎勵(建模時取負);讓 solver 主動堆中塊" },
+                      { key:"SHORT_BLOCK_PENALTY",    label:"S8 短塊(2天)罰",     def:800,  min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S8:同種班連續 2 天每塊罰;比 1 天塊輕;全職套用" },
+                      { key:"MID_BLOCK_REWARD",       label:"S9 中塊(3-4天)獎勵", def:1500, min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S9:同種班連續 3-4 天每塊獎勵(建模時取負);讓 solver 主動堆中塊" },
                       { key:"LONG_BLOCK_PENALTY",     label:"S10 長塊(≥5天)罰",    def:800,  min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S10:同種班連續 ≥5 天每塊罰(疲勞管理)" },
                       { key:"SEGMENT_PENALTY",        label:"S11 班種段數集中",   def:5000, min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S11 軟罰:每人每種班 D/E/N 段數超過 1 每多 1 段罰(OFF/LA 穿透);讓每種班集中在月內一段。與 H20 段數硬上限並存" },
                       { key:"TWO_OFF_EXTRA_REWARD",   label:"H17 多連2OFF獎勵",    def:500,  min:0, max:20000, cat:"H17 連 2OFF 獎勵",     tip:"H17 額外:每多一次連續 2 天 OFF pair 獎勵(OFF-OFF-OFF 算 2 對,鼓勵 OFF 塊狀化)" },
@@ -3751,12 +3751,12 @@ export default function AdminPage() {
             { no:"H10", title:"輪班屬性限制 + 固定班偏離", desc:"輪班DE 只排 D/E 等；勾「允許固定班偏離」＝最多 2 格，未勾＝0 格。公平優先版一律 0 格" },
             { no:"H11", title:"放假/調整類最高優先鎖定", desc:H11_DESC },
             { no:"H12", title:"半職視同應休", desc:"計入應休天數" },
-            { no:"H13", title:`單週期比例硬上限 ±${Number(penaltyForm["RATIO_CAP_DAYS"] ?? 2)} 天`, desc:`本週期內各班種天數偏離理想比例最多 ±${Number(penaltyForm["RATIO_CAP_DAYS"] ?? 2)} 天（例 10:10 極限 ${10-Number(penaltyForm["RATIO_CAP_DAYS"] ?? 2)}:${10+Number(penaltyForm["RATIO_CAP_DAYS"] ?? 2)}）。全職半職皆同` },
-            { no:"H14", title:Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 0) > 0 ? `雙週期加總比例目標 ±${Number(penaltyForm["RATIO_CAP_DAYS_DUAL"])} 天(軟)` : "雙週期加總比例目標（未啟用）", desc:Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 0) > 0 ? `本月+上月加總比例偏差目標 ±${Number(penaltyForm["RATIO_CAP_DAYS_DUAL"])} 天:solver 盡量滿足,超出以 H14_SOFT_PENALTY (現值 ${Number(penaltyForm["H14_SOFT_PENALTY"] ?? 1500)}) 每天罰。跨 attr(上月出現本月 attr 不允許的班種)自動不套 H14,避免 INFEASIBLE。與 H13 並存(H13 仍是硬上限)` : "設為 0（預設）= 關閉。設 >0 才啟用（進階調參 → 硬規則參數 → H14 雙週期加總比例目標）" },
+            { no:"H13", title:`單週期比例硬上限 ±${Number(penaltyForm["RATIO_CAP_DAYS"] ?? 5)} 天`, desc:`本週期內各班種天數偏離理想比例最多 ±${Number(penaltyForm["RATIO_CAP_DAYS"] ?? 5)} 天（例 10:10 極限 ${10-Number(penaltyForm["RATIO_CAP_DAYS"] ?? 5)}:${10+Number(penaltyForm["RATIO_CAP_DAYS"] ?? 5)}）。全職半職皆同` },
+            { no:"H14", title:Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 3) > 0 ? `雙週期加總比例目標 ±${Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 3)} 天(軟)` : "雙週期加總比例目標（未啟用）", desc:Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 3) > 0 ? `本月+上月加總比例偏差目標 ±${Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 3)} 天:solver 盡量滿足,超出以 H14_SOFT_PENALTY (現值 ${Number(penaltyForm["H14_SOFT_PENALTY"] ?? 1500)}) 每天罰。跨 attr(上月出現本月 attr 不允許的班種)自動不套 H14,避免 INFEASIBLE。與 H13 並存(H13 仍是硬上限)` : "設為 0 = 關閉。設 >0 才啟用（進階調參 → 硬規則參數 → H14 雙週期加總比例目標）" },
             { no:"H15", title:"行政類上班：視同 D、不計人力", desc:H14_DESC },
             { no:"H16", title:"新人不計臨床人力", desc:"新人=在學習的正式員工：照所有規則排、但 H1/H7/H8 排除。跟隨導師見 S6" },
             { no:"H17", title:"每週期至少一次連續 2 天 OFF", desc:`全職硬規則:週期內至少存在一次「OFF-OFF」(可跨週,如週日→週一 OK;僅不跨週期);半職不套用。V/員/喪等 LEAVE_ADJUST 天不算入配對。額外獎勵:每多一次連 2 OFF -${Number(penaltyForm["TWO_OFF_EXTRA_REWARD"] ?? 500)}(鼓勵 OFF 塊狀化,OFF-OFF-OFF 算 2 對)` },
-            { no:"H18", title:`每人孤立日硬上限(全職 ${(() => { const v = Number(penaltyForm["ISO_MAX_PER_NURSE"] ?? 1); return v < 0 ? "不限" : v === 0 ? "禁止" : `≤${v}`; })()}、半職 ${(() => { const v = Number(penaltyForm["ISO_MAX_PER_NURSE_HT"] ?? 2); return v < 0 ? "不限" : v === 0 ? "禁止" : `≤${v}`; })()})`, desc:`每人整週期內「OFF-上班-OFF」孤立上班日硬上限。-1=不限制;0=完全禁止;N>0=上限 N。半職給多 buffer。與 S2 軟罰疊加,硬性擋掉過多` },
+            { no:"H18", title:`每人孤立日硬上限(全職 ${(() => { const v = Number(penaltyForm["ISO_MAX_PER_NURSE"] ?? 2); return v < 0 ? "不限" : v === 0 ? "禁止" : `≤${v}`; })()}、半職 ${(() => { const v = Number(penaltyForm["ISO_MAX_PER_NURSE_HT"] ?? 1); return v < 0 ? "不限" : v === 0 ? "禁止" : `≤${v}`; })()})`, desc:`每人整週期內「OFF-上班-OFF」孤立上班日硬上限。-1=不限制;0=完全禁止;N>0=上限 N。與 S2 軟罰疊加,硬性擋掉過多` },
             { no:"H19", title:"應休優先(公平休假)", desc:"若有任何人未達應休天數(slack>0),則所有人不可超過應休天數(over=0)。先確保每人拿到應休,再考慮多餘 OFF 分配。全職半職皆套用;V/員/喪等 LEAVE_ADJUST 不算入。可在「排班規則 → 休假規則」勾選開關(預設開啟)" },
             { no:"H20", title:`班種段數硬上限(輪班2種 ≤${Number(penaltyForm["SEG_HARD_CAP_2"] ?? 5)}、輪班DEN ≤${Number(penaltyForm["SEG_HARD_CAP_3"] ?? 6)})`, desc:`S11 硬規則:每人整週期「所有班種段數加總」上限。段=同種班連續(OFF/半/V/員/喪 穿透),不同班切換算新段。半職、固定班不套用;可在「進階調參 → 硬規則參數」調整或設 0 關閉。過緊會 INFEASIBLE` },
           ];
@@ -3938,7 +3938,7 @@ export default function AdminPage() {
                 </table>
               </div>
               <div style={{ fontSize:11.5, color:"#78350f", marginTop:8, lineHeight:1.7 }}>
-                單期 = H13 <b>RATIO_CAP_DAYS</b>(現值 {Number(penaltyForm["RATIO_CAP_DAYS"] ?? 2)}) / 雙期 = H14 <b>RATIO_CAP_DAYS_DUAL</b>(現值 {Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 0)},0 = 關閉)<br/>
+                單期 = H13 <b>RATIO_CAP_DAYS</b>(現值 {Number(penaltyForm["RATIO_CAP_DAYS"] ?? 5)}) / 雙期 = H14 <b>RATIO_CAP_DAYS_DUAL</b>(現值 {Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 3)},0 = 關閉)<br/>
                 可於「進階調參 → 硬規則參數」調整。雙期需上月已有 committed 資料;無資料的人自動只套 H13。
               </div>
             </div>
@@ -4443,7 +4443,7 @@ export default function AdminPage() {
 
                   {/* ── 上月資料異常偵測 (H14 雙週期軟目標相關) */}
                   {(() => {
-                    const dualCap = Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 0);
+                    const dualCap = Number(penaltyForm["RATIO_CAP_DAYS_DUAL"] ?? 3);
                     const h14Pen = Number(penaltyForm["H14_SOFT_PENALTY"] ?? 1500);
                     const prevKeys = Object.keys(prevCycleCounts);
                     if (prevKeys.length === 0) return null;

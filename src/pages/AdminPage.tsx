@@ -2112,6 +2112,7 @@ export default function AdminPage() {
         .badge-super { background: #f3e8ff; color: #7c3aed; }
         .badge-leader  { background: #fef9c3; color: #854d0e; }
         .badge-second  { background: #e0f2fe; color: #0369a1; }
+        .badge-third   { background: #d1fae5; color: #065f46; }
         .badge-member  { background: #f3f4f6; color: #6b7280; }
 
         /* Drag rows */
@@ -2787,6 +2788,7 @@ export default function AdminPage() {
                           style={{ ...sel, width: 80, ...(curAdminStaff ? disabledSelStyle : {}) }}>
                           <option value="leader">leader</option>
                           <option value="second">second</option>
+                          <option value="third">third</option>
                           <option value="member">member</option>
                         </select>
                         <select value={curAttr} disabled={curAdminStaff}
@@ -2952,6 +2954,7 @@ export default function AdminPage() {
                         onChange={e => setNewUser(p=>({...p,level:e.target.value}))}>
                         <option value="leader">leader</option>
                         <option value="second">second</option>
+                        <option value="third">third</option>
                         <option value="member">member</option>
                       </select>
                     </div>
@@ -3800,7 +3803,7 @@ export default function AdminPage() {
             { no:"H4",  title:"每週 D/E/N 至多兩種班別", desc:"預填出現班屬外班別時，該週自動改為「例外+一種原班」" },
             { no:"H5",  title:"每週至少 1 天休", desc:"底線，恆常生效（OFF 或半）" },
             { no:"H7",  title:"每班每日至少 1 位 leader", desc:"行政班、新人的 leader 不算" },
-            { no:"H8",  title:"每班每日至少 2 位 leader/second", desc:"受當班需求人數上限 min(2, 需求)；行政班、新人不算" },
+            { no:"H8",  title:"白班至少 2 位 leader/second；夜班至少 2 位 leader/second/third", desc:"受當班需求人數上限 min(2, 需求)；行政班、新人不算" },
             { no:"H9",  title:"連續上班類+LA 天數不超過設定值", desc:"預設 5 天,跨週累計(含上週歷史)。計入:D/E/N/行政班(書/會/公) + LA(V/員/喪/延休/補休/調移);只有 OFF/半 才斷開連續。例:V V V V V OFF 可;V V V V V V 違規" },
             { no:"H10", title:"輪班屬性限制 + 固定班偏離", desc:"輪班DE 只排 D/E 等；勾「允許固定班偏離」＝最多 2 格，未勾＝0 格。公平優先版一律 0 格" },
             { no:"H11", title:"放假/調整類最高優先鎖定", desc:H11_DESC },
@@ -5845,6 +5848,7 @@ export default function AdminPage() {
                     onChange={e => setEditForm(p=>({...p,level:e.target.value}))}>
                     <option value="leader">leader</option>
                     <option value="second">second</option>
+                    <option value="third">third</option>
                     <option value="member">member</option>
                   </select>
                 </div>

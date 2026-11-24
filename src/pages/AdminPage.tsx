@@ -475,9 +475,9 @@ export default function AdminPage() {
 
   // 輪班比例
   const [ratioForm, setRatioForm] = useState({
-    de_d: 1, de_e: 1,          // 輪班DE
+    de_d: 1, de_e: 2,          // 輪班DE  D:E = 1:2
     en_e: 1, en_n: 1,          // 輪班EN
-    dn_d: 1, dn_n: 1,          // 輪班DN
+    dn_d: 1, dn_n: 2,          // 輪班DN  D:N = 1:2
     den_d: 1, den_e: 1, den_n: 1, // 輪班DEN
   });
   const [ratioCalc, setRatioCalc] = useState<null | { label: string; days: string; isOverride?: boolean }[]>(null);

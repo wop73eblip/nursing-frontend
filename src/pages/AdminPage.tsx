@@ -4931,12 +4931,18 @@ export default function AdminPage() {
                                     const bnd = v.metrics.best_bound ?? 0;
                                     const gap = obj !== 0 ? Math.abs((obj - bnd) / obj * 100) : 0;
                                     const status = v.metrics.solver_status ?? "";
-                                    const gapColor = gap < 10 ? "#16a34a" : gap < 30 ? "#d97706" : "#dc2626";
-                                    const gapLabel = gap < 10 ? "接近最佳" : gap < 30 ? "尚可" : "卡 local minima";
+                                    const rescued = v.metrics.rescued ?? false;
+                                    // 五分法評級:優(深綠)/良(亮綠)/普(黃)/差(橘)/劣(紅)
+                                    let tier: { label: string; bg: string; fg: string };
+                                    if (rescued) tier = { label: "劣", bg: "#ef4444", fg: "#ffffff" };
+                                    else if (status === "OPTIMAL") tier = { label: "優", bg: "#15803d", fg: "#ffffff" };
+                                    else if (gap < 20) tier = { label: "良", bg: "#4ade80", fg: "#14532d" };
+                                    else if (gap < 100) tier = { label: "普", bg: "#facc15", fg: "#78350f" };
+                                    else tier = { label: "差", bg: "#fb923c", fg: "#7c2d12" };
                                     return (
                                       <div style={{ marginTop:4, paddingTop:6, borderTop:"1px dashed #e5e7eb", fontSize:11.5, color:"#6b7280" }}>
-                                        分數:<b style={{color:"#374151"}}>{obj.toLocaleString()}</b>　下限:{bnd.toLocaleString()}
-                                        <span style={{color:gapColor,fontWeight:700}}>gap {gap.toFixed(1)}%</span>（{gapLabel}）
+                                        <span style={{ display:"inline-block", padding:"1px 9px", borderRadius:10, background:tier.bg, color:tier.fg, fontWeight:800, fontSize:11, marginRight:6 }}>{tier.label}</span>
+                                        分數:<b style={{color:"#374151"}}>{obj.toLocaleString()}</b>　下限:{bnd.toLocaleString()}　gap {gap.toFixed(1)}%
                                         {status && status !== "OPTIMAL" && status !== "FEASIBLE" && (
                                           <span style={{color:"#dc2626",marginLeft:6}}>[{status}]</span>
                                         )}

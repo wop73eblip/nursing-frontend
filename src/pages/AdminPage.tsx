@@ -1549,18 +1549,45 @@ export default function AdminPage() {
   // ── 規則儲存
   async function saveCycle() {
     try {
-      // 若 cycle 的起或迄日期變了,視為「換週期」,順便清空本期多休名單
+      // 若 cycle 的起或迄日期變了,視為「換週期」,連帶清理 4 項:
+      // 1. extra_off_this_cycle(含護理師介面「這個月我想多放假」)
+      // 2. special_dates:只保留落在新週期內的
+      // 3. shift_restrictions:兩端有一端超出週期就整條移除
+      // 4. max_off_days(週期內應休天數):重設為 0
       const cycleChanged = !!savedCycle && (
         savedCycle.start_date !== cycle.start_date ||
         savedCycle.end_date   !== cycle.end_date
       );
       const payload: any = { cycle };
-      if (cycleChanged) payload.extra_off_this_cycle = [];
+      let newScheduling = rulesForm;
+      let newRestrictions = shiftRestrictions;
+      let removedSpecial = 0;
+      let removedRestrict = 0;
+      if (cycleChanged) {
+        payload.extra_off_this_cycle = [];
+        const s = cycle.start_date;
+        const e = cycle.end_date;
+        const inCycle = (d: string) => !!d && d >= s && d <= e;
+        const origSpecial = rulesForm.special_dates || [];
+        const filteredSpecial = origSpecial.filter(sd => inCycle(sd.date));
+        removedSpecial = origSpecial.length - filteredSpecial.length;
+        newRestrictions = shiftRestrictions.filter(sr => inCycle(sr.start_date) && inCycle(sr.end_date));
+        removedRestrict = shiftRestrictions.length - newRestrictions.length;
+        newScheduling = { ...rulesForm, max_off_days: 0, special_dates: filteredSpecial };
+        payload.scheduling = newScheduling;
+        payload.shift_restrictions = newRestrictions;
+      }
       await api.post("/rules", { rules: payload });
       setSavedCycle(cycle);
       if (cycleChanged) {
         setExtraOffThisCycle([]);
-        showToast("✓ 週期設定已儲存(本期多休名單已自動清空)");
+        setRulesForm(newScheduling);
+        setShiftRestrictions(newRestrictions);
+        setSavedRules(newScheduling);
+        const msgParts = ["本期多休名單已清空", "應休天數重設為 0"];
+        if (removedSpecial > 0) msgParts.push(`移除 ${removedSpecial} 個週期外特殊日期`);
+        if (removedRestrict > 0) msgParts.push(`移除 ${removedRestrict} 條週期外班別限制`);
+        showToast(`✓ 週期設定已儲存(${msgParts.join('、')})`);
       } else {
         showToast("✓ 週期設定已儲存");
       }

@@ -3437,6 +3437,7 @@ export default function AdminPage() {
                       { key:"MID_BLOCK_REWARD",       label:"S9 中塊(3-4天)獎勵", def:1500, min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S9:同種班連續 3-4 天每塊獎勵(建模時取負);讓 solver 主動堆中塊" },
                       { key:"LONG_BLOCK_PENALTY",     label:"S10 長塊(≥5天)罰",    def:800,  min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S10:同種班連續 ≥5 天每塊罰(疲勞管理)" },
                       { key:"SEGMENT_PENALTY",        label:"S11 班種段數集中",   def:5000, min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S11 軟罰:每人每種班 D/E/N 段數超過 1 每多 1 段罰(OFF/LA 穿透);讓每種班集中在月內一段。與 H20 段數硬上限並存" },
+                      { key:"NO_LONG_OFF_PENALTY",    label:"S12 無長連休罰",     def:1000, min:0, max:20000, cat:"S8-S11 塊狀",     tip:"S12:全職應休 >8 天者,整期一次連續 N 天 OFF 也沒排出就扣分(N = 自動休連續上限)。設 0 = 關閉此規則;過高會讓 solver 變慢" },
                       { key:"TWO_OFF_EXTRA_REWARD",   label:"H17 多連2OFF獎勵",    def:500,  min:0, max:20000, cat:"H17 連 2OFF 獎勵",     tip:"H17 額外:每多一次連續 2 天 OFF pair 獎勵(OFF-OFF-OFF 算 2 對,鼓勵 OFF 塊狀化)" },
                       { key:"OVER_OFF_PENALTY_HALF",  label:"R2 半職超休罰",     def:500,  min:0, max:20000, cat:"R2 休假配額",   tip:"R2:半職 OFF 天數超過應休 quota 每天罰(通常低於全職,鼓勵 solver 給半職多 OFF)" },
                       { key:"OVER_OFF_PENALTY_FULL",  label:"R2 全職超休罰",     def:1500, min:0, max:20000, cat:"R2 休假配額",   tip:"R2:全職 OFF 天數超過應休 quota 每天罰(比半職重 → 多餘 OFF 優先給半職填滿)" },
@@ -3814,6 +3815,8 @@ export default function AdminPage() {
           const _midRew = P("MID_BLOCK_REWARD", 500);
           const _longBlk = P("LONG_BLOCK_PENALTY", 800);
           const _seg = P("SEGMENT_PENALTY", 5000);
+          const _noLongOff = P("NO_LONG_OFF_PENALTY", 1000);
+          const _longOffN = Number(rulesForm.weekly_max_off_auto ?? 3);
           const SOFT: (Row & { penalty?: string })[] = [
             { no:"S1", title:"順班", desc:`只罰「多餘換班」(+${_excess})+「沒休就換」(+${_direct})+「反向班換班」(+${_rev},E→D、N→E、N→D 即使合法隔OFF 也罰);輪班必要換班不罰。順班優先版(smooth)全部乘 SWITCH_MULT(預設 1.5),搭配 S8/S9/S10/S11 同步加乘` },
             { no:"S2", title:"避免孤立上班日", desc:`OFF-上班-OFF(只出來上一天班);半職 ×${_isoHt} 加重。全職硬上限 ≤1/人(見 H17);仍保留軟罰疊加`, penalty:`+${_iso}` },
@@ -3826,6 +3829,7 @@ export default function AdminPage() {
             { no:"S9", title:"中塊獎勵(甜蜜區)", desc:"同種班連續 3-4 天算「中塊」,每個獎勵(負罰)。solver 會主動堆中塊而非只是「避免短塊」的副作用", penalty:`-${_midRew} / 塊` },
             { no:"S10", title:"長塊懲罰(疲勞管理)", desc:"同種班連續 ≥5 天算「長塊」。避免連上太久疲勞(H9 連上限預設 5 天已硬擋更長)", penalty:`+${_longBlk} / 塊` },
             { no:"S11", title:"班種段數集中", desc:"每人每種班 D/E/N 各自的「段數」超過 1 段就罰。段的定義:只看真正上班的工作日順序(OFF/半/V/員/喪 全部穿透),換到不同班種才算新段。例:D D OFF D D = 1 段 D;D E D = 2 段 D + 1 段 E。目的:讓每種班在月內集中在一段(手排精神:先排完 D 再排 E 再排 N)", penalty:`+${_seg} / 多餘段` },
+            { no:"S12", title:`長連休獎勵(全職應休 >8 天)`, desc:`全職護理師若本期應休 > 8 天,盡量安排一次連續 ${_longOffN} 天 OFF(N = 自動休連續上限,目前 ${_longOffN})。整個週期內有任一段連續 N 天 OFF 即滿足;若一次都沒有,整人扣 ${_noLongOff}。V/員/喪等 LEAVE_ADJUST 天會跳過不列入候選窗。半職、離職者、固定班 不套用。N ≤ 2 時由 H17「連 2 OFF」硬規則涵蓋,本規則不啟用`, penalty:`+${_noLongOff} / 人(整期沒 ${_longOffN} 連休才罰)` },
           ];
           // 前端硬擋：不進 CP-SAT，在護理師預班階段就擋住
           const FRONT: Row[] = [

@@ -433,10 +433,12 @@ export default function AdminPage() {
     deadline_date: string;
     deadline_time: string;
     holiday_days: number;
+    holiday_dates: string[];   // 國定假日實際日期清單 YYYY-MM-DD,目前僅用於離職者在職期間國定假日分攤
   };
   const CYCLE_DEFAULT: CycleState = {
     start_date: "", end_date: "", period_days: 28,
     deadline_date: "", deadline_time: "23:59", holiday_days: 0,
+    holiday_dates: [],
   };
   // 若 localStorage 有 cache 則首個 render 直接是最後一次的 cycle（不 flash）
   const _hasCachedCycle = (() => {
@@ -504,6 +506,8 @@ export default function AdminPage() {
   const [generating, setGenerating] = useState(false);
   // 儲存排班規則中（防連點、顯示進度）
   const [savingRules, setSavingRules] = useState<null | "penalties" | "ratio" | "all">(null);
+  // 國定假日新增用的 date picker 暫存值
+  const [holidayDateInput, setHolidayDateInput] = useState<string>("");
   // 進階調參:懲罰值 & 求解器參數（後台 UI 可調,存 rules.penalties;優先序 DB > env > 硬編 default）
   const [penaltyForm, setPenaltyForm] = useState<Record<string, number>>({});
   // 一鍵生成的取消機制：abortRef 中止當下正在跑的 axios,cancelRef flag 讓迴圈到下個 profile 前就 break
@@ -1167,6 +1171,7 @@ export default function AdminPage() {
                 ? Math.max(1, dayjs(r.cycle.end_date).diff(dayjs(r.cycle.start_date),'day') + 1)
                 : prev.period_days
             ),
+            holiday_dates: Array.isArray(r.cycle.holiday_dates) ? r.cycle.holiday_dates : [],
           };
           setSavedCycle(merged);
           // 快取到 localStorage 供下次登入即刻 hydrate（避免載入 flash）
@@ -3153,22 +3158,6 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {/* 參考說明 */}
-            <div style={{ padding:"14px 16px", background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, fontSize:13, color:"#6b7280", lineHeight:1.8 }}>
-              <b style={{ color:"#374151" }}>📌 後台班表說明：</b><br />
-              • 後台「手動填寫」分頁將額外顯示班表開始日<b>前 7 天</b>（灰色欄），由管理員填寫，護理師不可見。<br />
-              • 這 7 天資料僅作為排班規則的參考依據（如連大夜判斷），不納入本次排班輸出。<br />
-              • 護理師的預班頁面只顯示本次週期日期範圍（班表開始日 ～ 班表結束日）。
-            </div>
-          </div>
-        )}
-
-        {/* ══════════════════════════════════
-            Tab: 排班規則
-        ══════════════════════════════════ */}
-        {tab === "rules" && (
-          <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth:740 }}>
-
             {/* 休假天數(週期內應休天數 + 多餘 OFF 分配) */}
             <div className="card">
               <div className="card-head"><div style={{ fontSize:16, fontWeight:700 }}>🏖 休假天數</div></div>
@@ -3176,7 +3165,7 @@ export default function AdminPage() {
                 <div className="fl">
 
                   <div className="setting-section">
-                    <div className="setting-title">🗓 週期內應休天數</div>
+                    <div className="setting-title">📅 週期內應休天數</div>
                     <div style={{ maxWidth:280 }}>
                       <label className="flabel">本週期國定假日天數（0 ～ 5 天）</label>
                       <NumInput className="finput" min={0} max={5} value={cycle.holiday_days}
@@ -3255,6 +3244,95 @@ export default function AdminPage() {
                 </div>
               </div>
             </div>
+
+            {/* 國定假日日期清單(目前僅用於離職者在職期間國定假日分攤) */}
+            <div className="card">
+              <div className="card-head"><div style={{ fontSize:16, fontWeight:700 }}>🗓 國定假日</div></div>
+              <div className="card-body">
+                <div style={{ fontSize:13, color:"#6b7280", marginBottom:10, lineHeight:1.6 }}>
+                  只用於離職者,計算在職期間實際遇到的國定假日。其他人仍走上方「國定假日天數」設定。
+                </div>
+                {cycle.start_date && cycle.end_date && (
+                  <div style={{ fontSize:12, color:"#9ca3af", marginBottom:8 }}>本週期:{cycle.start_date} ～ {cycle.end_date}</div>
+                )}
+                <div style={{ display:"flex", flexWrap:"wrap", gap:6, padding:"10px 12px", border:"1px dashed #d1d5db", borderRadius:8, minHeight:56, background:"#fafafa", marginBottom:12 }}>
+                  {(!cycle.holiday_dates || cycle.holiday_dates.length === 0) && (
+                    <span style={{ fontSize:12, color:"#9ca3af", alignSelf:"center" }}>尚未新增國定假日日期</span>
+                  )}
+                  {[...(cycle.holiday_dates || [])].sort().map(d => {
+                    const inCycle = !!cycle.start_date && !!cycle.end_date && d >= cycle.start_date && d <= cycle.end_date;
+                    return (
+                      <span key={d} title={inCycle ? "" : "此日期不在目前週期內"}
+                        style={{
+                          display:"inline-flex", alignItems:"center", gap:4, padding:"4px 10px",
+                          background: inCycle ? "#dbeafe" : "#f3f4f6",
+                          color: inCycle ? "#1e40af" : "#9ca3af",
+                          borderRadius:14, fontSize:13,
+                          textDecoration: inCycle ? "none" : "line-through",
+                        }}>
+                        {d}
+                        <span onClick={() => setCycle(p => ({ ...p, holiday_dates: (p.holiday_dates || []).filter(x => x !== d) }))}
+                          style={{ cursor:"pointer", fontWeight:700, marginLeft:2 }}>×</span>
+                      </span>
+                    );
+                  })}
+                </div>
+                <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:12 }}>
+                  <input type="date" value={holidayDateInput}
+                    onChange={e => setHolidayDateInput(e.target.value)}
+                    style={{ padding:"6px 10px", border:"1px solid #d1d5db", borderRadius:7, fontSize:13, fontFamily:"inherit" }} />
+                  <button className="btn btn-primary" onClick={() => {
+                    const v = (holidayDateInput || "").trim();
+                    if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) { showToast("✗ 請選擇有效日期", false); return; }
+                    if ((cycle.holiday_dates || []).includes(v)) { showToast("ℹ 已存在此日期", false); return; }
+                    setCycle(p => ({ ...p, holiday_dates: [...(p.holiday_dates || []), v] }));
+                    setHolidayDateInput("");
+                  }}>+ 加入</button>
+                </div>
+                {(() => {
+                  const terminated = nurseUsers.filter(u => u.terminated_at && !u.admin_staff);
+                  if (terminated.length === 0 || !cycle.start_date || !cycle.end_date) return null;
+                  const inCycleDates = (cycle.holiday_dates || []).filter(d => d >= cycle.start_date && d <= cycle.end_date);
+                  return (
+                    <div style={{ background:"#fef3c7", border:"1px solid #fde68a", borderRadius:8, padding:"10px 12px", fontSize:12, color:"#92400e", marginBottom:12 }}>
+                      <div style={{ fontWeight:600, marginBottom:6 }}>本週期內的離職者分攤</div>
+                      <div style={{ display:"grid", gridTemplateColumns:"1fr auto", gap:"4px 12px" }}>
+                        {terminated.map(u => {
+                          const td = u.terminated_at as string;
+                          const share = inCycleDates.filter(d => d >= cycle.start_date && d <= td).length;
+                          return (
+                            <Fragment key={u.uid}>
+                              <span>{u.name || u.uid}(離職日 {td})</span>
+                              <span style={{ color:"#854F0B" }}>分攤 {share} 天</span>
+                            </Fragment>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <button className="btn btn-primary" onClick={saveCycle}>儲存國定假日</button>
+                  <span style={{ fontSize:12, color:"#9ca3af" }}>目前 {(cycle.holiday_dates || []).filter(d => !cycle.start_date || !cycle.end_date || (d >= cycle.start_date && d <= cycle.end_date)).length} 個有效日期</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 參考說明 */}
+            <div style={{ padding:"14px 16px", background:"#fafafa", border:"1px solid #e5e7eb", borderRadius:10, fontSize:13, color:"#6b7280", lineHeight:1.8 }}>
+              <b style={{ color:"#374151" }}>📌 後台班表說明：</b><br />
+              • 後台「手動填寫」分頁將額外顯示班表開始日<b>前 7 天</b>（灰色欄），由管理員填寫，護理師不可見。<br />
+              • 這 7 天資料僅作為排班規則的參考依據（如連大夜判斷），不納入本次排班輸出。<br />
+              • 護理師的預班頁面只顯示本次週期日期範圍（班表開始日 ～ 班表結束日）。
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════
+            Tab: 排班規則
+        ══════════════════════════════════ */}
+        {tab === "rules" && (
+          <div style={{ display:"flex", flexDirection:"column", gap:16, maxWidth:740 }}>
 
             {/* 休假與人數 */}
             <div className="card">

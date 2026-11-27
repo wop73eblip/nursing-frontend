@@ -502,6 +502,8 @@ export default function AdminPage() {
 
   // Generate tab state（必須在頂層，不可放 IIFE 內）
   const [generating, setGenerating] = useState(false);
+  // 儲存排班規則中（防連點、顯示進度）
+  const [savingRules, setSavingRules] = useState<null | "penalties" | "ratio" | "all">(null);
   // 進階調參:懲罰值 & 求解器參數（後台 UI 可調,存 rules.penalties;優先序 DB > env > 硬編 default）
   const [penaltyForm, setPenaltyForm] = useState<Record<string, number>>({});
   // 一鍵生成的取消機制：abortRef 中止當下正在跑的 axios,cancelRef flag 讓迴圈到下個 profile 前就 break
@@ -1596,13 +1598,27 @@ export default function AdminPage() {
       showToast(`✗ ${msg}`, false);
     }
   }
-  async function saveSchedulingRules() {
+  // scope 控制只送改過的那包,減少傳輸體積與後端整包 rewrite;
+  // 後端 /rules 是 merge({...current_data, ...incoming}),沒送的 key 不會動。
+  async function saveSchedulingRules(scope: "penalties" | "ratio" | "all" = "all") {
+    if (savingRules) return;   // 防連點
+    setSavingRules(scope);
     try {
-      await api.post("/rules", { rules: { scheduling: rulesForm, ratio: ratioForm, ratio_overrides: ratioOverrides, penalties: penaltyForm } });
-      setSavedRules(rulesForm);   // 儲存成功後才更新一鍵生成頁籤顯示的快照
-      showToast("✓ 排班規則已儲存");
+      let payload: Record<string, any>;
+      if (scope === "penalties") {
+        payload = { penalties: penaltyForm };
+      } else if (scope === "ratio") {
+        payload = { ratio: ratioForm, ratio_overrides: ratioOverrides };
+      } else {
+        payload = { scheduling: rulesForm, ratio: ratioForm, ratio_overrides: ratioOverrides, penalties: penaltyForm };
+      }
+      await api.post("/rules", { rules: payload });
+      if (scope === "all") setSavedRules(rulesForm);   // 僅 all 情境更新一鍵生成頁籤的快照
+      showToast(scope === "penalties" ? "✓ 進階調參已儲存" : scope === "ratio" ? "✓ 輪班比例已儲存" : "✓ 排班規則已儲存");
     } catch (err: any) {
       showToast(`✗ ${err.response?.data?.detail ?? err.message ?? "儲存失敗"}`, false);
+    } finally {
+      setSavingRules(null);
     }
   }
 
@@ -3532,8 +3548,13 @@ export default function AdminPage() {
                     );
                   })()}
 
-                  <button className="btn btn-primary" style={{ alignSelf:"flex-start" }} onClick={saveSchedulingRules}>
-                    儲存排班規則
+                  <button
+                    className="btn btn-primary"
+                    style={{ alignSelf:"flex-start", opacity: savingRules === "penalties" ? 0.6 : 1 }}
+                    disabled={savingRules !== null}
+                    onClick={() => saveSchedulingRules("penalties")}
+                  >
+                    {savingRules === "penalties" ? "儲存中…" : "儲存排班規則"}
                   </button>
                 </div>
               </div>
@@ -3676,8 +3697,13 @@ export default function AdminPage() {
                     </div>
                   )}
 
-                  <button className="btn btn-primary" style={{ alignSelf:"flex-start" }} onClick={saveSchedulingRules}>
-                    儲存輪班比例
+                  <button
+                    className="btn btn-primary"
+                    style={{ alignSelf:"flex-start", opacity: savingRules === "ratio" ? 0.6 : 1 }}
+                    disabled={savingRules !== null}
+                    onClick={() => saveSchedulingRules("ratio")}
+                  >
+                    {savingRules === "ratio" ? "儲存中…" : "儲存輪班比例"}
                   </button>
                 </div>
               </div>
